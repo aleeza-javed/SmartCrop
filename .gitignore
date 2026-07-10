@@ -44,6 +44,10 @@ app.*.map.json
 /android/app/profile
 /android/app/release
 
+# Unused platforms (iOS/macOS removed)
+ios/
+macos/
+
 # Machine-specific local properties
 local.properties
 
