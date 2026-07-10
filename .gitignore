@@ -43,3 +43,9 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Machine-specific local properties
+local.properties
+
+# Android build output (in addition to root /build/)
+android/build/

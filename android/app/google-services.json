@@ -1,0 +1,46 @@
+{
+  "project_info": {
+    "project_number": "1083437709603",
+    "project_id": "smart-crop-ddf69",
+    "storage_bucket": "smart-crop-ddf69.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1083437709603:android:be6fa7e6bb055b4992f496",
+        "android_client_info": {
+          "package_name": "com.smartcrop.smart_crop"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "1083437709603-0us6ge3jj3hjto92i2jsrj2fsod777mm.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyChsHBhrYf8l6u6VCQ-YUF8H7FQ1vexI6M"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "1083437709603-0us6ge3jj3hjto92i2jsrj2fsod777mm.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "1083437709603-2334adhltp86h6a3p12b7vdkd3hiu0cq.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.smartcrop.smartCrop"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

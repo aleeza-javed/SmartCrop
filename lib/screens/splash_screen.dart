@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import '../theme/app_colors.dart';
 import 'login_screen.dart';
+import 'dashboard_screen.dart';
 
 const _logoAsset = 'assets/smartcrop_new.png';
 
@@ -97,10 +99,14 @@ class _SplashScreenState extends State<SplashScreen>
 
     await Future.delayed(const Duration(milliseconds: 600));
     if (!mounted) return;
+
+    final user = FirebaseAuth.instance.currentUser;
+    final destination = user != null ? const DashboardScreen() : const LoginScreen();
+
     Navigator.pushReplacement(
       context,
       PageRouteBuilder(
-        pageBuilder: (context, anim1, anim2) => const LoginScreen(),
+        pageBuilder: (context, anim1, anim2) => destination,
         transitionsBuilder: (context, anim, _, child) =>
             FadeTransition(opacity: anim, child: child),
         transitionDuration: const Duration(milliseconds: 500),

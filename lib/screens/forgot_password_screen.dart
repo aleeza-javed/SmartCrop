@@ -2,7 +2,9 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import '../theme/app_colors.dart';
+import '../services/auth_service.dart';
 
 const _bgAsset   = 'assets/background image .jpeg';
 const _logoAsset = 'assets/smartcrop_new.png';
@@ -16,6 +18,7 @@ class ForgotPasswordScreen extends StatefulWidget {
 
 class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
   final _emailController = TextEditingController();
+  final _authService = AuthService();
   bool _submitted = false;
   bool _loading = false;
 
@@ -51,9 +54,29 @@ class _ForgotPasswordScreenState extends State<ForgotPasswordScreen> {
       return;
     }
     setState(() => _loading = true);
-    // Simulate network delay
-    await Future.delayed(const Duration(milliseconds: 1200));
-    if (mounted) setState(() { _loading = false; _submitted = true; });
+    try {
+      await _authService.sendPasswordReset(email);
+      if (mounted) setState(() { _submitted = true; });
+    } on FirebaseAuthException catch (e) {
+      String msg = 'Failed to send reset email.';
+      if (e.code == 'user-not-found') {
+        msg = 'No account found with this email.';
+      } else if (e.code == 'invalid-email') {
+        msg = 'Please enter a valid email address.';
+      }
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(msg, style: GoogleFonts.plusJakartaSans(fontSize: 14)),
+            backgroundColor: Colors.red.shade700,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
   }
 
   @override

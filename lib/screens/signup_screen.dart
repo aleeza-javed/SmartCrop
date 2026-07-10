@@ -2,7 +2,10 @@ import 'package:flutter/material.dart';
 import 'dart:ui';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import '../theme/app_colors.dart';
+import '../services/auth_service.dart';
+import 'login_screen.dart';
 
 const _bgAsset     = 'assets/background image .jpeg';
 const _logoAsset   = 'assets/smartcrop_new.png';
@@ -19,6 +22,12 @@ class _SignupScreenState extends State<SignupScreen> {
   bool _obscurePassword = true;
   bool _obscureConfirm = true;
   bool _agreeToTerms = false;
+  bool _loading = false;
+  final _nameController = TextEditingController();
+  final _emailController = TextEditingController();
+  final _passwordController = TextEditingController();
+  final _confirmPasswordController = TextEditingController();
+  final _authService = AuthService();
 
   @override
   void initState() {
@@ -27,6 +36,110 @@ class _SignupScreenState extends State<SignupScreen> {
       statusBarColor: Colors.transparent,
       statusBarIconBrightness: Brightness.light,
     ));
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _emailController.dispose();
+    _passwordController.dispose();
+    _confirmPasswordController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _onSignUp() async {
+    final email = _emailController.text.trim();
+    final password = _passwordController.text;
+    final confirm = _confirmPasswordController.text;
+
+    if (email.isEmpty || password.isEmpty || confirm.isEmpty) {
+      _showError('Please fill in all fields.');
+      return;
+    }
+
+    if (password.length < 6) {
+      _showError('Password must be at least 6 characters.');
+      return;
+    }
+
+    if (password != confirm) {
+      _showError('Passwords do not match.');
+      return;
+    }
+
+    if (!_agreeToTerms) {
+      _showError('Please agree to the Terms of Service and Privacy Policy.');
+      return;
+    }
+
+    setState(() => _loading = true);
+
+    try {
+      await _authService.signUp(email, password);
+      if (mounted) {
+        Navigator.pushAndRemoveUntil(
+          context,
+          MaterialPageRoute(builder: (_) => const LoginScreen()),
+          (route) => false,
+        );
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Account created! Please sign in.',
+              style: GoogleFonts.plusJakartaSans(fontSize: 14),
+            ),
+            backgroundColor: Colors.green.shade700,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(10)),
+          ),
+        );
+      }
+    } on FirebaseAuthException catch (e) {
+      String msg = 'Sign up failed. Please try again.';
+      if (e.code == 'email-already-in-use') {
+        msg = 'An account with this email already exists.';
+      } else if (e.code == 'weak-password') {
+        msg = 'Password is too weak.';
+      } else if (e.code == 'invalid-email') {
+        msg = 'Please enter a valid email address.';
+      }
+      _showError(msg);
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _handleGoogleSignIn() async {
+    setState(() => _loading = true);
+    try {
+      await _authService.signInWithGoogle();
+      if (mounted) {
+        Navigator.pushAndRemoveUntil(
+          context,
+          MaterialPageRoute(builder: (_) => const LoginScreen()),
+          (route) => false,
+        );
+      }
+    } on FirebaseAuthException catch (e) {
+      _showError(e.message ?? 'Google sign-in failed.');
+    } catch (e) {
+      if (e.toString().contains('cancelled')) return;
+      _showError('$e');
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  void _showError(String msg) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(msg, style: GoogleFonts.plusJakartaSans(fontSize: 14)),
+        backgroundColor: Colors.red.shade700,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      ),
+    );
   }
 
   @override
@@ -51,15 +164,22 @@ class _SignupScreenState extends State<SignupScreen> {
             Padding(
               padding: EdgeInsets.only(top: heroHeight - 60),
               child: _SignupFormCard(
+                loading: _loading,
                 obscurePassword: _obscurePassword,
                 obscureConfirm: _obscureConfirm,
                 agreeToTerms: _agreeToTerms,
+                nameController: _nameController,
+                emailController: _emailController,
+                passwordController: _passwordController,
+                confirmPasswordController: _confirmPasswordController,
                 onTogglePassword: () =>
                     setState(() => _obscurePassword = !_obscurePassword),
                 onToggleConfirm: () =>
                     setState(() => _obscureConfirm = !_obscureConfirm),
                 onAgreeChanged: (v) => setState(() => _agreeToTerms = v),
+                onSignUpTap: _onSignUp,
                 onLoginTap: () => Navigator.pop(context),
+                onGoogleTap: _handleGoogleSignIn,
               ),
             ),
           ],
@@ -189,19 +309,33 @@ class _SignupFormCard extends StatelessWidget {
   final bool obscurePassword;
   final bool obscureConfirm;
   final bool agreeToTerms;
+  final bool loading;
+  final TextEditingController nameController;
+  final TextEditingController emailController;
+  final TextEditingController passwordController;
+  final TextEditingController confirmPasswordController;
   final VoidCallback onTogglePassword;
   final VoidCallback onToggleConfirm;
   final ValueChanged<bool> onAgreeChanged;
+  final VoidCallback onSignUpTap;
   final VoidCallback onLoginTap;
+  final VoidCallback? onGoogleTap;
 
   const _SignupFormCard({
     required this.obscurePassword,
     required this.obscureConfirm,
     required this.agreeToTerms,
+    required this.loading,
+    required this.nameController,
+    required this.emailController,
+    required this.passwordController,
+    required this.confirmPasswordController,
     required this.onTogglePassword,
     required this.onToggleConfirm,
     required this.onAgreeChanged,
+    required this.onSignUpTap,
     required this.onLoginTap,
+    this.onGoogleTap,
   });
 
   @override
@@ -255,6 +389,7 @@ class _SignupFormCard extends StatelessWidget {
             prefixIcon: Icons.person_outline_rounded,
             keyboardType: TextInputType.name,
             textCapitalization: TextCapitalization.words,
+            controller: nameController,
           ),
           const SizedBox(height: 20),
 
@@ -264,6 +399,7 @@ class _SignupFormCard extends StatelessWidget {
             hint: 'Enter email or phone number',
             prefixIcon: Icons.email_outlined,
             keyboardType: TextInputType.emailAddress,
+            controller: emailController,
           ),
           const SizedBox(height: 20),
 
@@ -273,6 +409,7 @@ class _SignupFormCard extends StatelessWidget {
             hint: 'Create a strong password',
             obscure: obscurePassword,
             onToggle: onTogglePassword,
+            controller: passwordController,
           ),
           const SizedBox(height: 20),
 
@@ -282,6 +419,7 @@ class _SignupFormCard extends StatelessWidget {
             hint: 'Re-enter your password',
             obscure: obscureConfirm,
             onToggle: onToggleConfirm,
+            controller: confirmPasswordController,
           ),
           const SizedBox(height: 20),
 
@@ -334,20 +472,27 @@ class _SignupFormCard extends StatelessWidget {
           SizedBox(
             height: 56,
             child: ElevatedButton(
-              onPressed: () {},
+              onPressed: loading ? null : onSignUpTap,
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.primary,
                 foregroundColor: Colors.white,
+                disabledBackgroundColor: AppColors.primary.withValues(alpha: 0.6),
                 shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12)),
                 elevation: 4,
                 shadowColor: AppColors.primary.withValues(alpha: 0.3),
               ),
-              child: Text(
-                'Create Account',
-                style: GoogleFonts.plusJakartaSans(
-                    fontSize: 16, fontWeight: FontWeight.w700),
-              ),
+              child: loading
+                  ? const SizedBox(
+                      width: 22, height: 22,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2.5, color: Colors.white),
+                    )
+                  : Text(
+                      'Create Account',
+                      style: GoogleFonts.plusJakartaSans(
+                          fontSize: 16, fontWeight: FontWeight.w700),
+                    ),
             ),
           ),
           const SizedBox(height: 20),
@@ -364,6 +509,7 @@ class _SignupFormCard extends StatelessWidget {
               child: Image.asset(_googleAsset, width: 22, height: 22,
                   fit: BoxFit.cover),
             ),
+            onTap: onGoogleTap,
           ),
           const SizedBox(height: 14),
           _SocialButton(
@@ -428,6 +574,7 @@ class _AuthInputField extends StatelessWidget {
   final IconData prefixIcon;
   final TextInputType? keyboardType;
   final TextCapitalization textCapitalization;
+  final TextEditingController? controller;
 
   const _AuthInputField({
     required this.label,
@@ -435,6 +582,7 @@ class _AuthInputField extends StatelessWidget {
     required this.prefixIcon,
     this.keyboardType,
     this.textCapitalization = TextCapitalization.none,
+    this.controller,
   });
 
   @override
@@ -452,6 +600,7 @@ class _AuthInputField extends StatelessWidget {
         ),
         const SizedBox(height: 6),
         TextFormField(
+          controller: controller,
           keyboardType: keyboardType,
           textCapitalization: textCapitalization,
           style: GoogleFonts.plusJakartaSans(
@@ -475,12 +624,14 @@ class _PasswordField extends StatelessWidget {
   final String hint;
   final bool obscure;
   final VoidCallback onToggle;
+  final TextEditingController? controller;
 
   const _PasswordField({
     required this.label,
     required this.hint,
     required this.obscure,
     required this.onToggle,
+    this.controller,
   });
 
   @override
@@ -498,6 +649,7 @@ class _PasswordField extends StatelessWidget {
         ),
         const SizedBox(height: 6),
         TextFormField(
+          controller: controller,
           obscureText: obscure,
           style: GoogleFonts.plusJakartaSans(
               fontSize: 14, color: AppColors.onBackground),
@@ -554,15 +706,16 @@ class _OrDivider extends StatelessWidget {
 class _SocialButton extends StatelessWidget {
   final String label;
   final Widget icon;
+  final VoidCallback? onTap;
 
-  const _SocialButton({required this.label, required this.icon});
+  const _SocialButton({required this.label, required this.icon, this.onTap});
 
   @override
   Widget build(BuildContext context) {
     return SizedBox(
       height: 54,
       child: OutlinedButton(
-        onPressed: () {},
+        onPressed: onTap,
         style: OutlinedButton.styleFrom(
           side: const BorderSide(color: AppColors.outlineVariant),
           shape:

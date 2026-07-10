@@ -3,11 +3,13 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'dart:io';
 import '../theme/app_colors.dart';
+import '../services/auth_service.dart';
 import 'edit_profile_screen.dart';
 import 'notifications_screen.dart';
 import 'my_fields_screen.dart';
 import 'connected_sensors_screen.dart';
 import 'help_center_screen.dart';
+import 'login_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -19,6 +21,18 @@ class ProfileScreen extends StatefulWidget {
 class _ProfileScreenState extends State<ProfileScreen> {
   XFile? _profileImage;
   final ImagePicker _imagePicker = ImagePicker();
+  final AuthService _authService = AuthService();
+
+  Future<void> _logout() async {
+    await _authService.logout();
+    if (mounted) {
+      Navigator.pushAndRemoveUntil(
+        context,
+        MaterialPageRoute(builder: (_) => const LoginScreen()),
+        (route) => false,
+      );
+    }
+  }
 
   Future<void> _pickProfileImage() async {
     try {
@@ -316,7 +330,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                             TextButton(
                               onPressed: () {
                                 Navigator.pop(context);
-                                // Handle logout
+                                _logout();
                               },
                               child: Text(
                                 'Logout',

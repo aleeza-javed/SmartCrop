@@ -60,9 +60,11 @@ class _ReportsTabState extends State<ReportsTab> {
 
   Future<void> _shareFile(String filePath, String reportName) async {
     try {
-      await Share.shareXFiles(
-        [XFile(filePath)],
-        subject: 'SmartCrop Report: $reportName',
+      await SharePlus.instance.share(
+        ShareParams(
+          files: [XFile(filePath)],
+          subject: 'SmartCrop Report: $reportName',
+        ),
       );
     } catch (e) {
       if (mounted) {

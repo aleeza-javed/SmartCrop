@@ -2,7 +2,9 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import '../theme/app_colors.dart';
+import '../services/auth_service.dart';
 import 'signup_screen.dart';
 import 'dashboard_screen.dart';
 import 'forgot_password_screen.dart';
@@ -21,8 +23,10 @@ class LoginScreen extends StatefulWidget {
 class _LoginScreenState extends State<LoginScreen> {
   bool _rememberMe = true;
   bool _obscurePassword = true;
+  bool _loading = false;
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
+  final _authService = AuthService();
 
   @override
   void initState() {
@@ -40,28 +44,69 @@ class _LoginScreenState extends State<LoginScreen> {
     super.dispose();
   }
 
-  void _onLogin() {
+  Future<void> _onLogin() async {
     final email = _emailController.text.trim();
     final password = _passwordController.text;
-    if (email == 'main@gmail.com' && password == 'Admin123') {
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (_) => const DashboardScreen()),
-      );
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            'Invalid email or password.',
-            style: GoogleFonts.plusJakartaSans(fontSize: 14),
-          ),
-          backgroundColor: Colors.red.shade700,
-          behavior: SnackBarBehavior.floating,
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-        ),
-      );
+
+    if (email.isEmpty || password.isEmpty) {
+      _showError('Please fill in all fields.');
+      return;
     }
+
+    setState(() => _loading = true);
+
+    try {
+      await _authService.login(email, password);
+      if (mounted) {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (_) => const DashboardScreen()),
+        );
+      }
+    } on FirebaseAuthException catch (e) {
+      String msg = 'Login failed. Please try again.';
+      if (e.code == 'user-not-found') {
+        msg = 'No account found with this email.';
+      } else if (e.code == 'wrong-password' || e.code == 'invalid-credential') {
+        msg = 'Invalid email or password.';
+      } else if (e.code == 'invalid-email') {
+        msg = 'Please enter a valid email address.';
+      }
+      _showError(msg);
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  Future<void> _handleGoogleSignIn() async {
+    setState(() => _loading = true);
+    try {
+      await _authService.signInWithGoogle();
+      if (mounted) {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(builder: (_) => const DashboardScreen()),
+        );
+      }
+    } on FirebaseAuthException catch (e) {
+      _showError(e.message ?? 'Google sign-in failed.');
+    } catch (e) {
+      if (e.toString().contains('cancelled')) return;
+      _showError('$e');
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
+  }
+
+  void _showError(String msg) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(msg, style: GoogleFonts.plusJakartaSans(fontSize: 14)),
+        backgroundColor: Colors.red.shade700,
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      ),
+    );
   }
 
   @override
@@ -88,6 +133,7 @@ class _LoginScreenState extends State<LoginScreen> {
               child: _FormCard(
                 rememberMe: _rememberMe,
                 obscurePassword: _obscurePassword,
+                loading: _loading,
                 emailController: _emailController,
                 passwordController: _passwordController,
                 onRememberMeChanged: (v) => setState(() => _rememberMe = v),
@@ -98,6 +144,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   context,
                   MaterialPageRoute(builder: (_) => const SignupScreen()),
                 ),
+                onGoogleTap: _handleGoogleSignIn,
               ),
             ),
           ],
@@ -206,22 +253,26 @@ class _HeroSection extends StatelessWidget {
 class _FormCard extends StatelessWidget {
   final bool rememberMe;
   final bool obscurePassword;
+  final bool loading;
   final TextEditingController emailController;
   final TextEditingController passwordController;
   final ValueChanged<bool> onRememberMeChanged;
   final VoidCallback onTogglePassword;
   final VoidCallback onLoginTap;
   final VoidCallback onSignUpTap;
+  final VoidCallback? onGoogleTap;
 
   const _FormCard({
     required this.rememberMe,
     required this.obscurePassword,
+    required this.loading,
     required this.emailController,
     required this.passwordController,
     required this.onRememberMeChanged,
     required this.onTogglePassword,
     required this.onLoginTap,
     required this.onSignUpTap,
+    this.onGoogleTap,
   });
 
   @override
@@ -336,20 +387,27 @@ class _FormCard extends StatelessWidget {
           SizedBox(
             height: 56,
             child: ElevatedButton(
-              onPressed: onLoginTap,
+              onPressed: loading ? null : onLoginTap,
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.primary,
                 foregroundColor: Colors.white,
+                disabledBackgroundColor: AppColors.primary.withValues(alpha: 0.6),
                 shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12)),
                 elevation: 4,
                 shadowColor: AppColors.primary.withValues(alpha: 0.3),
               ),
-              child: Text(
-                'Login',
-                style: GoogleFonts.plusJakartaSans(
-                    fontSize: 16, fontWeight: FontWeight.w700),
-              ),
+              child: loading
+                  ? const SizedBox(
+                      width: 22, height: 22,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2.5, color: Colors.white),
+                    )
+                  : Text(
+                      'Login',
+                      style: GoogleFonts.plusJakartaSans(
+                          fontSize: 16, fontWeight: FontWeight.w700),
+                    ),
             ),
           ),
           const SizedBox(height: 16),
@@ -366,6 +424,7 @@ class _FormCard extends StatelessWidget {
               child: Image.asset(_googleAsset, width: 22, height: 22,
                   fit: BoxFit.cover),
             ),
+            onTap: onGoogleTap,
           ),
           const SizedBox(height: 12),
           _SocialButton(
@@ -559,15 +618,16 @@ class _OrDivider extends StatelessWidget {
 class _SocialButton extends StatelessWidget {
   final String label;
   final Widget icon;
+  final VoidCallback? onTap;
 
-  const _SocialButton({required this.label, required this.icon});
+  const _SocialButton({required this.label, required this.icon, this.onTap});
 
   @override
   Widget build(BuildContext context) {
     return SizedBox(
       height: 54,
       child: OutlinedButton(
-        onPressed: () {},
+        onPressed: onTap,
         style: OutlinedButton.styleFrom(
           side: const BorderSide(color: AppColors.outlineVariant),
           shape:
