@@ -75,7 +75,11 @@ class _SignupScreenState extends State<SignupScreen> {
     setState(() => _loading = true);
 
     try {
-      await _authService.signUp(email, password);
+      await _authService.signUp(
+        email,
+        password,
+        displayName: _nameController.text.trim(),
+      );
       if (mounted) {
         Navigator.pushAndRemoveUntil(
           context,
@@ -510,12 +514,6 @@ class _SignupFormCard extends StatelessWidget {
                   fit: BoxFit.cover),
             ),
             onTap: onGoogleTap,
-          ),
-          const SizedBox(height: 14),
-          _SocialButton(
-            label: 'Continue with Apple',
-            icon: const Icon(Icons.apple,
-                size: 22, color: AppColors.onBackground),
           ),
           const SizedBox(height: 24),
 

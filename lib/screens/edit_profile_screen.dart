@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'dart:io';
+import 'package:firebase_auth/firebase_auth.dart';
 import '../theme/app_colors.dart';
 
 class EditProfileScreen extends StatefulWidget {
@@ -15,8 +16,12 @@ class EditProfileScreen extends StatefulWidget {
 class _EditProfileScreenState extends State<EditProfileScreen> {
   final _formKey = GlobalKey<FormState>();
 
-  final _nameController = TextEditingController(text: 'Muhammad Ali');
-  final _emailController = TextEditingController(text: 'muhammad.ali@example.com');
+  final _nameController = TextEditingController(
+    text: FirebaseAuth.instance.currentUser?.displayName ?? '',
+  );
+  final _emailController = TextEditingController(
+    text: FirebaseAuth.instance.currentUser?.email ?? '',
+  );
   final _phoneController = TextEditingController(text: '+92 300 1234567');
   final _locationController = TextEditingController(text: 'Faisalabad, Punjab');
 
@@ -44,33 +49,49 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   Future<void> _saveChanges() async {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _saving = true);
-    await Future.delayed(const Duration(milliseconds: 1200));
-    if (!mounted) return;
-    setState(() => _saving = false);
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Row(
-          children: [
-            const Icon(Icons.check_circle_rounded, color: Colors.white, size: 18),
-            const SizedBox(width: 10),
-            Text(
-              'Profile updated successfully',
-              style: GoogleFonts.plusJakartaSans(
-                fontSize: 14,
-                fontWeight: FontWeight.w600,
-                color: Colors.white,
+
+    try {
+      final user = FirebaseAuth.instance.currentUser;
+      if (user != null) {
+        await user.updateDisplayName(_nameController.text.trim());
+        await user.reload();
+      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              const Icon(Icons.check_circle_rounded, color: Colors.white, size: 18),
+              const SizedBox(width: 10),
+              Text(
+                'Profile updated successfully',
+                style: GoogleFonts.plusJakartaSans(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: Colors.white,
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
+          backgroundColor: AppColors.primary,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          margin: const EdgeInsets.all(16),
+          duration: const Duration(seconds: 2),
         ),
-        backgroundColor: AppColors.primary,
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        margin: const EdgeInsets.all(16),
-        duration: const Duration(seconds: 2),
-      ),
-    );
-    Navigator.pop(context);
+      );
+      Navigator.pop(context);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Failed to update profile: $e'),
+          backgroundColor: Colors.red.shade700,
+        ),
+      );
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
   }
 
   @override

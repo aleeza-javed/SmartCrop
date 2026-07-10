@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'dart:io';
+import 'package:firebase_auth/firebase_auth.dart';
 import '../theme/app_colors.dart';
 import '../services/auth_service.dart';
 import 'edit_profile_screen.dart';
@@ -147,7 +148,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 const SizedBox(height: 16),
                 // Name and Email
                 Text(
-                  'Muhammad Ali',
+                  FirebaseAuth.instance.currentUser?.displayName ?? 'User',
                   style: GoogleFonts.plusJakartaSans(
                     fontSize: 20,
                     fontWeight: FontWeight.w700,
@@ -156,7 +157,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  'muhammad.ali@example.com',
+                  FirebaseAuth.instance.currentUser?.email ?? '',
                   style: GoogleFonts.plusJakartaSans(
                     fontSize: 14,
                     color: AppColors.onSurfaceVariant,

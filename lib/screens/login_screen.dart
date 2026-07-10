@@ -426,12 +426,6 @@ class _FormCard extends StatelessWidget {
             ),
             onTap: onGoogleTap,
           ),
-          const SizedBox(height: 12),
-          _SocialButton(
-            label: 'Continue with Apple',
-            icon: const Icon(Icons.apple,
-                size: 22, color: AppColors.onBackground),
-          ),
           const SizedBox(height: 16),
 
           // Sign up link
