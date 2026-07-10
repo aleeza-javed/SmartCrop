@@ -1,7 +1,10 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import '../models/sensor_data.dart';
+import '../services/sensor_service.dart';
 import '../theme/app_colors.dart';
 import 'sensors_screen.dart';
 import 'insights_tab.dart';
@@ -22,6 +25,9 @@ class DashboardScreen extends StatefulWidget {
 
 class _DashboardScreenState extends State<DashboardScreen> {
   int _selectedTab = 0;
+  final SensorService _sensorService = SensorService();
+  SensorData? _sensorData;
+  StreamSubscription<SensorData>? _subscription;
 
   @override
   void initState() {
@@ -30,6 +36,15 @@ class _DashboardScreenState extends State<DashboardScreen> {
       statusBarColor: Colors.transparent,
       statusBarIconBrightness: Brightness.dark,
     ));
+    _subscription = _sensorService.sensorDataStream().listen((data) {
+      if (mounted) setState(() => _sensorData = data);
+    });
+  }
+
+  @override
+  void dispose() {
+    _subscription?.cancel();
+    super.dispose();
   }
 
   @override
@@ -42,7 +57,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
           _TopBar(topPad: topPad),
           Expanded(
             child: switch (_selectedTab) {
-              0 => _HomeTab(onViewSensors: () => setState(() => _selectedTab = 1)),
+              0 => _HomeTab(
+                  sensorData: _sensorData,
+                  onViewSensors: () => setState(() => _selectedTab = 1),
+                ),
               1 => const SensorsTab(),
               2 => const InsightsTab(),
               3 => const ReportsTab(),
@@ -91,25 +109,28 @@ class _DashboardScreenState extends State<DashboardScreen> {
 // ─── Home Tab ────────────────────────────────────────────────────────────────
 
 class _HomeTab extends StatelessWidget {
+  final SensorData? sensorData;
   final VoidCallback onViewSensors;
-  const _HomeTab({required this.onViewSensors});
+  const _HomeTab({required this.sensorData, required this.onViewSensors});
 
   @override
   Widget build(BuildContext context) {
+    final data = sensorData;
+
     return SingleChildScrollView(
       padding: const EdgeInsets.only(bottom: 32),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const SizedBox(height: 24),
-          const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 16),
-            child: _GreetingWeatherRow(),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: _GreetingWeatherRow(airTemp: data?.airTemp),
           ),
           const SizedBox(height: 24),
-          const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 16),
-            child: _MainFieldCard(),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: _MainFieldCard(sensorData: data),
           ),
           const SizedBox(height: 28),
           Padding(
@@ -142,7 +163,10 @@ class _HomeTab extends StatelessWidget {
           const SizedBox(height: 14),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: _FieldOverviewRow(onTap: onViewSensors),
+            child: _FieldOverviewRow(
+              sensorData: data,
+              onTap: onViewSensors,
+            ),
           ),
           const SizedBox(height: 28),
           Padding(
@@ -162,9 +186,9 @@ class _HomeTab extends StatelessWidget {
             child: _AiRecommendationCard(),
           ),
           const SizedBox(height: 28),
-          const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 16),
-            child: _StatusAlert(),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: _StatusAlert(sensorData: data),
           ),
         ],
       ),
@@ -242,10 +266,12 @@ class _TopBar extends StatelessWidget {
 // ─── Greeting + Weather Row ───────────────────────────────────────────────────
 
 class _GreetingWeatherRow extends StatelessWidget {
-  const _GreetingWeatherRow();
+  final double? airTemp;
+  const _GreetingWeatherRow({this.airTemp});
 
   @override
   Widget build(BuildContext context) {
+    final temp = airTemp ?? 28;
     return Row(
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
@@ -314,7 +340,7 @@ class _GreetingWeatherRow extends StatelessWidget {
               ),
               const SizedBox(height: 8),
               Text(
-                '28°C',
+                '${temp.toStringAsFixed(0)}°C',
                 style: GoogleFonts.plusJakartaSans(
                   fontSize: 18,
                   fontWeight: FontWeight.w700,
@@ -323,7 +349,7 @@ class _GreetingWeatherRow extends StatelessWidget {
               ),
               const SizedBox(height: 2),
               Text(
-                'Partly\nCloudy',
+                temp >= 30 ? 'Warm' : 'Partly\nCloudy',
                 style: GoogleFonts.manrope(
                   fontSize: 11,
                   fontWeight: FontWeight.w600,
@@ -343,10 +369,25 @@ class _GreetingWeatherRow extends StatelessWidget {
 // ─── Main Field Card ──────────────────────────────────────────────────────────
 
 class _MainFieldCard extends StatelessWidget {
-  const _MainFieldCard();
+  final SensorData? sensorData;
+  const _MainFieldCard({this.sensorData});
 
   @override
   Widget build(BuildContext context) {
+    final data = sensorData;
+    final moisture = data?.soilMoisturePercent ?? 42;
+    final temp = data?.airTemp ?? 28;
+    final ph = data?.pH ?? 6.5;
+    final rain = data?.rainPercent ?? 20;
+    final now = DateTime.now();
+    final time =
+        '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
+
+    final moistureStatus = moisture >= 40 ? 'NORMAL' : moisture >= 20 ? 'LOW' : 'DRY';
+    final tempStatus = temp >= 25 && temp <= 35 ? 'NORMAL' : temp > 35 ? 'HOT' : 'COOL';
+    final phStatus = ph >= 6.0 && ph <= 7.5 ? 'NEUTRAL' : ph < 6.0 ? 'ACIDIC' : 'ALKALINE';
+    final rainStatus = rain >= 30 ? 'HIGH' : rain >= 10 ? 'LOW' : 'DRY';
+
     return Container(
       padding: const EdgeInsets.fromLTRB(20, 22, 20, 28),
       decoration: BoxDecoration(
@@ -424,7 +465,7 @@ class _MainFieldCard extends StatelessWidget {
                   Row(
                     children: [
                       Text(
-                        '10:30 AM',
+                        time,
                         style: GoogleFonts.plusJakartaSans(
                           fontSize: 13,
                           fontWeight: FontWeight.w700,
@@ -444,25 +485,25 @@ class _MainFieldCard extends StatelessWidget {
           // Circular metrics row
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceAround,
-            children: const [
+            children: [
               _CircularMetric(
                 icon: Icons.water_drop_outlined,
-                value: '42%',
+                value: '${moisture.toStringAsFixed(0)}%',
                 label: 'SOIL\nMOISTURE',
               ),
               _CircularMetric(
                 icon: Icons.thermostat_outlined,
-                value: '28°C',
+                value: '${temp.toStringAsFixed(0)}°C',
                 label: 'TEMPER-\nATURE',
               ),
               _CircularMetricText(
                 text: 'pH',
-                value: '6.5',
+                value: ph.toStringAsFixed(1),
                 label: 'pH LEVEL',
               ),
               _CircularMetric(
                 icon: Icons.cloudy_snowing,
-                value: '20%',
+                value: '${rain.toStringAsFixed(0)}%',
                 label: 'RAIN\nCHANCE',
               ),
             ],
@@ -471,11 +512,11 @@ class _MainFieldCard extends StatelessWidget {
           // Status row
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceAround,
-            children: const [
-              _MetricStatus(label: 'NORMAL'),
-              _MetricStatus(label: 'NORMAL'),
-              _MetricStatus(label: 'ACIDIC'),
-              _MetricStatus(label: 'LOW'),
+            children: [
+              _MetricStatus(label: moistureStatus),
+              _MetricStatus(label: tempStatus),
+              _MetricStatus(label: phStatus),
+              _MetricStatus(label: rainStatus),
             ],
           ),
         ],
@@ -614,22 +655,42 @@ class _MetricStatus extends StatelessWidget {
 // ─── Field Overview Row ───────────────────────────────────────────────────────
 
 class _FieldOverviewRow extends StatelessWidget {
+  final SensorData? sensorData;
   final VoidCallback onTap;
-  const _FieldOverviewRow({required this.onTap});
+  const _FieldOverviewRow({this.sensorData, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
+    final data = sensorData;
+    final n = data?.n ?? 38;
+    final p = data?.p ?? 24;
+    final k = data?.k ?? 210;
+    final hum = data?.airHumidity ?? 65;
+
     return Row(
       children: [
-        Expanded(child: _OverviewCard(top: 'N', value: '38 ppm', status: 'Adequate', onTap: onTap)),
+        Expanded(child: _OverviewCard(top: 'N', value: '${n.toStringAsFixed(0)} ppm', status: n.toNutrientStatus().dashboardLabel, onTap: onTap)),
         const SizedBox(width: 10),
-        Expanded(child: _OverviewCard(top: 'P', value: '24 ppm', status: 'Adequate', onTap: onTap)),
+        Expanded(child: _OverviewCard(top: 'P', value: '${p.toStringAsFixed(0)} ppm', status: p.toNutrientStatus().dashboardLabel, onTap: onTap)),
         const SizedBox(width: 10),
-        Expanded(child: _OverviewCard(top: 'K', value: '210 ppm', status: 'Adequate', onTap: onTap)),
+        Expanded(child: _OverviewCard(top: 'K', value: '${k.toStringAsFixed(0)} ppm', status: k.toNutrientStatus().dashboardLabel, onTap: onTap)),
         const SizedBox(width: 10),
-        Expanded(child: _OverviewCardIcon(icon: Icons.light_mode_outlined, value: '65%', status: 'Good', onTap: onTap)),
+        Expanded(child: _OverviewCardIcon(icon: Icons.light_mode_outlined, value: '${hum.toStringAsFixed(0)}%', status: 'Good', onTap: onTap)),
       ],
     );
+  }
+}
+
+extension on NutrientStatus {
+  String get dashboardLabel {
+    switch (this) {
+      case NutrientStatus.adequate:
+        return 'Adequate';
+      case NutrientStatus.low:
+        return 'Low';
+      case NutrientStatus.high:
+        return 'High';
+    }
   }
 }
 
@@ -865,17 +926,28 @@ class _AiRecommendationCard extends StatelessWidget {
 // ─── Status Alert ─────────────────────────────────────────────────────────────
 
 class _StatusAlert extends StatelessWidget {
-  const _StatusAlert();
+  final SensorData? sensorData;
+  const _StatusAlert({this.sensorData});
 
   @override
   Widget build(BuildContext context) {
+    final data = sensorData;
+    final moisture = data?.soilMoisturePercent ?? 42;
+    final isNormal = moisture >= 40;
+    final icon = isNormal ? Icons.check_circle_outline_rounded : Icons.warning_amber_rounded;
+    final bgColor = isNormal ? const Color(0xFFE8F5E9) : const Color(0xFFFFF3E0);
+    final borderColor = isNormal ? AppColors.primary.withValues(alpha: 0.2) : const Color(0xFFFFCC80).withValues(alpha: 0.4);
+    final iconColor = isNormal ? AppColors.primary : const Color(0xFFE65100);
+    final message = isNormal
+        ? 'Auto Irrigation is Active. Soil moisture is normal. No irrigation needed.'
+        : 'Soil moisture is low (${moisture.toStringAsFixed(0)}%). Consider starting irrigation.';
+
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: const Color(0xFFE8F5E9),
+        color: bgColor,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(
-            color: AppColors.primary.withValues(alpha: 0.2), width: 1),
+        border: Border.all(color: borderColor, width: 1),
       ),
       child: Row(
         children: [
@@ -883,16 +955,15 @@ class _StatusAlert extends StatelessWidget {
             width: 34,
             height: 34,
             decoration: BoxDecoration(
-              color: AppColors.primary.withValues(alpha: 0.12),
+              color: iconColor.withValues(alpha: 0.12),
               shape: BoxShape.circle,
             ),
-            child: const Icon(Icons.check_circle_outline_rounded,
-                color: AppColors.primary, size: 18),
+            child: Icon(icon, color: iconColor, size: 18),
           ),
           const SizedBox(width: 12),
           Expanded(
             child: Text(
-              'Auto Irrigation is Active. Soil moisture is normal. No irrigation needed.',
+              message,
               style: GoogleFonts.plusJakartaSans(
                 fontSize: 13,
                 color: AppColors.onBackground,

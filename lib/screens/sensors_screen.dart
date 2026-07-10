@@ -1,6 +1,9 @@
+import 'dart:async';
 import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import '../models/sensor_data.dart';
+import '../services/sensor_service.dart';
 import '../theme/app_colors.dart';
 import 'device_pairing_screen.dart';
 import 'sensor_alert_detail_screen.dart';
@@ -13,8 +16,31 @@ class SensorsTab extends StatefulWidget {
 }
 
 class _SensorsTabState extends State<SensorsTab> {
+  final SensorService _sensorService = SensorService();
+  SensorData? _sensorData;
+  StreamSubscription<SensorData>? _subscription;
+
+  @override
+  void initState() {
+    super.initState();
+    _subscription = _sensorService.sensorDataStream().listen((data) {
+      if (mounted) setState(() => _sensorData = data);
+    });
+  }
+
+  @override
+  void dispose() {
+    _subscription?.cancel();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
+    final data = _sensorData;
+    if (data == null) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
     return SingleChildScrollView(
       padding: const EdgeInsets.only(bottom: 32),
       child: Column(
@@ -23,9 +49,11 @@ class _SensorsTabState extends State<SensorsTab> {
           const SizedBox(height: 12),
 
           // ── Location Card ──
-          const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 16),
-            child: _LocationCard(),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: _LocationCard(
+              lastUpdated: _formatTime(DateTime.now()),
+            ),
           ),
           const SizedBox(height: 24),
 
@@ -51,25 +79,27 @@ class _SensorsTabState extends State<SensorsTab> {
               crossAxisSpacing: 12,
               mainAxisSpacing: 12,
               childAspectRatio: 0.9,
-              children: const [
-                _SoilMoistureCard(),
+              children: [
+                _SoilMoistureCard(
+                  moisturePercent: data.soilMoisturePercent,
+                ),
                 _SimpleMetricCard(
                   label: 'Temperature',
-                  value: '28',
+                  value: data.airTemp.toStringAsFixed(1),
                   unit: '°C',
-                  status: 'Normal',
+                  status: _tempStatus(data.airTemp),
                   statusColor: _StatusColor.green,
                 ),
                 _SimpleMetricCard(
                   label: 'pH Level',
-                  value: '6.5',
+                  value: data.pH.toStringAsFixed(1),
                   unit: '',
-                  status: 'Sl. Acidic',
+                  status: _pHStatus(data.pH),
                   statusColor: _StatusColor.teal,
                 ),
                 _SimpleMetricCard(
-                  label: 'Light Intensity',
-                  value: '65',
+                  label: 'Humidity',
+                  value: data.airHumidity.toStringAsFixed(0),
                   unit: '%',
                   status: 'Good',
                   statusColor: _StatusColor.green,
@@ -95,20 +125,29 @@ class _SensorsTabState extends State<SensorsTab> {
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: Row(
-              children: const [
+              children: [
                 Expanded(
                   child: _NutrientCard(
-                      symbol: 'N', value: '38', unit: 'ppm', status: 'Adequate'),
+                      symbol: 'N',
+                      value: data.n.toStringAsFixed(0),
+                      unit: 'ppm',
+                      status: data.n.toNutrientStatus().label),
                 ),
-                SizedBox(width: 10),
+                const SizedBox(width: 10),
                 Expanded(
                   child: _NutrientCard(
-                      symbol: 'P', value: '24', unit: 'ppm', status: 'Adequate'),
+                      symbol: 'P',
+                      value: data.p.toStringAsFixed(0),
+                      unit: 'ppm',
+                      status: data.p.toNutrientStatus().label),
                 ),
-                SizedBox(width: 10),
+                const SizedBox(width: 10),
                 Expanded(
                   child: _NutrientCard(
-                      symbol: 'K', value: '210', unit: 'ppm', status: 'Adequate'),
+                      symbol: 'K',
+                      value: data.k.toStringAsFixed(0),
+                      unit: 'ppm',
+                      status: data.k.toNutrientStatus().label),
                 ),
               ],
             ),
@@ -207,28 +246,15 @@ class _SensorsTabState extends State<SensorsTab> {
             ),
           ),
           const SizedBox(height: 14),
-          const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 16),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
             child: _DeviceCard(
-              name: 'Moisture-X Hub',
-              serial: '8821-449-1',
-              battery: 0.88,
-              batteryLabel: '88%',
-              icon: Icons.memory_rounded,
-              iconColor: Color(0xFF1565C0),
-              online: true,
-            ),
-          ),
-          const SizedBox(height: 10),
-          const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 16),
-            child: _DeviceCard(
-              name: 'LightNode Pro',
-              serial: '7712-003-A',
-              battery: 0.42,
-              batteryLabel: '42%',
-              icon: Icons.bolt_rounded,
-              iconColor: Color(0xFFF9A825),
+              name: 'Smart Sensor Node',
+              serial: data.n == 0 ? 'N/A' : 'Online',
+              battery: 0.75,
+              batteryLabel: '75%',
+              icon: Icons.sensors_rounded,
+              iconColor: const Color(0xFF1565C0),
               online: true,
             ),
           ),
@@ -236,12 +262,44 @@ class _SensorsTabState extends State<SensorsTab> {
       ),
     );
   }
+
+  String _tempStatus(double temp) {
+    if (temp >= 25 && temp <= 35) return 'Normal';
+    if (temp > 35) return 'Hot';
+    return 'Cool';
+  }
+
+  String _pHStatus(double pH) {
+    if (pH >= 6.0 && pH <= 7.5) return 'Neutral';
+    if (pH < 6.0) return 'Acidic';
+    return 'Alkaline';
+  }
+
+  String _formatTime(DateTime dt) {
+    final h = dt.hour.toString().padLeft(2, '0');
+    final m = dt.minute.toString().padLeft(2, '0');
+    return '$h:$m';
+  }
+}
+
+extension on NutrientStatus {
+  String get label {
+    switch (this) {
+      case NutrientStatus.adequate:
+        return 'Adequate';
+      case NutrientStatus.low:
+        return 'Low';
+      case NutrientStatus.high:
+        return 'High';
+    }
+  }
 }
 
 // ─── Location Card ────────────────────────────────────────────────────────────
 
 class _LocationCard extends StatelessWidget {
-  const _LocationCard();
+  final String lastUpdated;
+  const _LocationCard({required this.lastUpdated});
 
   @override
   Widget build(BuildContext context) {
@@ -300,7 +358,7 @@ class _LocationCard extends StatelessWidget {
               ),
               const SizedBox(height: 3),
               Text(
-                '10:30 AM',
+                lastUpdated,
                 style: GoogleFonts.plusJakartaSans(
                   fontSize: 18,
                   fontWeight: FontWeight.w700,
@@ -318,10 +376,19 @@ class _LocationCard extends StatelessWidget {
 // ─── Soil Moisture Card (with arc gauge) ─────────────────────────────────────
 
 class _SoilMoistureCard extends StatelessWidget {
-  const _SoilMoistureCard();
+  final double moisturePercent;
+  const _SoilMoistureCard({required this.moisturePercent});
 
   @override
   Widget build(BuildContext context) {
+    final fraction = (moisturePercent / 100).clamp(0.0, 1.0);
+    final status = fraction.toMoistureStatus();
+    final (label, color) = switch (status) {
+      MoistureStatus.optimal => ('Optimal', _StatusColor.green),
+      MoistureStatus.low => ('Low', _StatusColor.amber),
+      MoistureStatus.dry => ('Dry', _StatusColor.amber),
+    };
+
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
       decoration: BoxDecoration(
@@ -353,10 +420,10 @@ class _SoilMoistureCard extends StatelessWidget {
             width: 80,
             height: 80,
             child: CustomPaint(
-              painter: _ArcGaugePainter(value: 0.42),
+              painter: _ArcGaugePainter(value: fraction),
               child: Center(
                 child: Text(
-                  '42%',
+                  '${moisturePercent.toStringAsFixed(0)}%',
                   style: GoogleFonts.plusJakartaSans(
                     fontSize: 18,
                     fontWeight: FontWeight.w700,
@@ -366,7 +433,7 @@ class _SoilMoistureCard extends StatelessWidget {
               ),
             ),
           ),
-          _StatusChip(label: 'Normal', color: _StatusColor.green),
+          _StatusChip(label: label, color: color),
         ],
       ),
     );
