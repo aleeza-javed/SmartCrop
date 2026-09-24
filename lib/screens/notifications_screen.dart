@@ -1,86 +1,79 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
+import '../models/sensor_data.dart';
+import '../services/crop_api_service.dart';
 import '../theme/app_colors.dart';
 import 'sensor_alert_detail_screen.dart';
 
 class NotificationsScreen extends StatefulWidget {
-  const NotificationsScreen({super.key});
+  final SensorData? sensorData;
+  final String crop;
+  const NotificationsScreen({super.key, this.sensorData, this.crop = 'wheat'});
 
   @override
   State<NotificationsScreen> createState() => _NotificationsScreenState();
 }
 
 class _NotificationsScreenState extends State<NotificationsScreen> {
-  final List<_NotifData> _notifications = [
-    _NotifData(
-      id: 1,
-      type: _NotifType.critical,
-      title: 'Low Nitrogen Alert — Sector A-12',
-      body: 'Nitrogen levels at 38 ppm, below the 60 ppm threshold for Winter Wheat tillering stage.',
-      time: '10m ago',
-      isRead: false,
-      isToday: true,
-    ),
-    _NotifData(
-      id: 2,
-      type: _NotifType.recommendation,
-      title: 'Irrigation Recommended',
-      body: 'Soil moisture dropped to 21% in North Field. Irrigate within 6 hours for optimal crop health.',
-      time: '1h ago',
-      isRead: false,
-      isToday: true,
-    ),
-    _NotifData(
-      id: 3,
-      type: _NotifType.system,
-      title: 'Sensor Online — Moisture-X Hub',
-      body: 'Your sensor node SN:8821-449-1 is now active and transmitting data.',
-      time: '3h ago',
-      isRead: true,
-      isToday: true,
-    ),
-    _NotifData(
-      id: 4,
-      type: _NotifType.summary,
-      title: 'Weekly Field Summary',
-      body: 'Total water usage decreased by 14% this week. Soil health index improved by 0.3 points.',
-      time: 'Yesterday',
-      isRead: true,
-      isToday: false,
-    ),
-    _NotifData(
-      id: 5,
-      type: _NotifType.pest,
-      title: 'Pest Risk Detected',
-      body: 'Satellite analysis indicates early-stage fungal growth risk in East Field. Inspect recommended.',
-      time: '2 days ago',
-      isRead: true,
-      isToday: false,
-    ),
-    _NotifData(
-      id: 6,
-      type: _NotifType.recommendation,
-      title: 'Fertilization Window Open',
-      body: 'Weather forecast shows clear skies for 48 hours. Ideal window to apply scheduled fertilizer.',
-      time: '3 days ago',
-      isRead: true,
-      isToday: false,
-    ),
-  ];
+  bool _loading = true;
+  List<MonitoringAlert> _alerts = [];
+  String? _error;
+  final Map<int, bool> _readMap = {};
+  int _nextId = 1;
 
-  void _markAllRead() {
-    setState(() {
-      for (final n in _notifications) {
-        n.isRead = true;
-      }
-    });
+  @override
+  void initState() {
+    super.initState();
+    _fetchAlerts();
   }
 
-  void _markRead(int id) {
+  Future<void> _fetchAlerts() async {
+    final data = widget.sensorData;
+    if (data == null) {
+      setState(() {
+        _error = 'Sensor data unavailable';
+        _loading = false;
+      });
+      return;
+    }
     setState(() {
-      _notifications.firstWhere((n) => n.id == id).isRead = true;
+      _loading = true;
+      _alerts = [];
+      _error = null;
     });
+    try {
+      final current = {
+        'N': data.n,
+        'P': data.p,
+        'K': data.k,
+        'temperature': data.airTemp,
+        'humidity': data.airHumidity,
+        'ph': data.pH,
+        'soil_moisture': data.soilMoisturePercent,
+      };
+      final result = await CropApiService.getMonitoringAlerts(
+        crop: widget.crop,
+        current: current,
+      );
+      setState(() {
+        _alerts = result.alerts;
+        for (var i = 0; i < _alerts.length; i++) {
+          _readMap[_nextId + i] = false;
+        }
+        _nextId += _alerts.length;
+        _loading = false;
+      });
+    } catch (e) {
+      setState(() {
+        _error = 'Failed to load notifications: $e';
+        _loading = false;
+      });
+    }
+  }
+
+  int _getUnreadCount() {
+    return _readMap.values.where((v) => !v).length;
   }
 
   @override
@@ -90,59 +83,99 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       statusBarIconBrightness: Brightness.light,
     ));
 
-    final today = _notifications.where((n) => n.isToday).toList();
-    final earlier = _notifications.where((n) => !n.isToday).toList();
-    final unreadCount = _notifications.where((n) => !n.isRead).length;
-
     return Scaffold(
       backgroundColor: const Color(0xFFF4F6F3),
       body: Column(
         children: [
           _Header(
-            unreadCount: unreadCount,
+            unreadCount: _getUnreadCount(),
             onBack: () => Navigator.pop(context),
             onMarkAll: _markAllRead,
           ),
           Expanded(
-            child: _notifications.isEmpty
-                ? const _EmptyState()
-                : ListView(
-                    padding: const EdgeInsets.only(bottom: 40),
-                    children: [
-                      if (today.isNotEmpty) ...[
-                        _SectionLabel(label: 'Today'),
-                        ...today.map((n) => _NotifTile(
-                              data: n,
-                              onTap: () => _onTap(n),
-                            )),
-                      ],
-                      if (earlier.isNotEmpty) ...[
-                        _SectionLabel(label: 'Earlier'),
-                        ...earlier.map((n) => _NotifTile(
-                              data: n,
-                              onTap: () => _onTap(n),
-                            )),
-                      ],
-                    ],
-                  ),
+            child: _loading
+                ? const Center(child: CircularProgressIndicator())
+                : _error != null
+                    ? _ErrorWidget(message: _error!)
+                    : _alerts.isEmpty
+                        ? const _EmptyState()
+                        : ListView(
+                            padding: const EdgeInsets.only(bottom: 40),
+                            children: [
+                              ..._alerts.asMap().entries.map((entry) {
+                                final id = entry.key + 1;
+                                final alert = entry.value;
+                                return _NotifTile(
+                                  alert: alert,
+                                  onTap: () => _onTap(id),
+                                  isRead: _readMap[id] ?? true,
+                                );
+                              }),
+                            ],
+                          ),
           ),
         ],
       ),
     );
   }
 
-  void _onTap(_NotifData notif) {
-    _markRead(notif.id);
-    if (notif.type == _NotifType.critical) {
+  void _markAllRead() {
+    setState(() {
+      for (final key in _readMap.keys) {
+        _readMap[key] = true;
+      }
+    });
+  }
+
+  void _onTap(int id) {
+    _readMap[id] = true;
+    if (mounted) {
       Navigator.push(
         context,
-        MaterialPageRoute(builder: (_) => const SensorAlertDetailScreen()),
+        MaterialPageRoute(
+          builder: (_) => SensorAlertDetailScreen(
+            sensorData: widget.sensorData,
+            crop: widget.crop,
+          ),
+        ),
       );
     }
   }
 }
 
-// ─── Header ──────────────────────────────────────────────────────────────────
+class _ErrorWidget extends StatelessWidget {
+  final String message;
+  const _ErrorWidget({required this.message});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFEBEE),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFFFFCDD2), width: 1),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.error_outline_rounded, color: Color(0xFFBA1A1A), size: 20),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              message,
+              style: GoogleFonts.manrope(
+                fontSize: 12,
+                color: const Color(0xFF4A3000),
+                fontWeight: FontWeight.w500,
+                height: 1.4,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
 
 class _Header extends StatelessWidget {
   final int unreadCount;
@@ -172,8 +205,7 @@ class _Header extends StatelessWidget {
         ),
       ),
       child: Padding(
-        padding: EdgeInsets.only(
-            top: topPad + 12, bottom: 24, left: 16, right: 16),
+        padding: EdgeInsets.only(top: topPad + 12, bottom: 24, left: 16, right: 16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -267,53 +299,34 @@ class _Header extends StatelessWidget {
   }
 }
 
-// ─── Section Label ────────────────────────────────────────────────────────────
-
-class _SectionLabel extends StatelessWidget {
-  final String label;
-  const _SectionLabel({required this.label});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 20, 20, 8),
-      child: Text(
-        label.toUpperCase(),
-        style: GoogleFonts.manrope(
-          fontSize: 11,
-          fontWeight: FontWeight.w700,
-          color: const Color(0xFF6B7A6B),
-          letterSpacing: 0.8,
-        ),
-      ),
-    );
-  }
-}
-
-// ─── Notification Tile ────────────────────────────────────────────────────────
-
 class _NotifTile extends StatelessWidget {
-  final _NotifData data;
+  final MonitoringAlert alert;
   final VoidCallback onTap;
+  final bool isRead;
 
-  const _NotifTile({required this.data, required this.onTap});
+  const _NotifTile({
+    required this.alert,
+    required this.onTap,
+    required this.isRead,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final cfg = _notifConfig(data.type);
+    final isCritical = alert.severity == 'CRITICAL';
+    final bgColor = isRead ? Colors.white : const Color(0xFFF0FAF0);
+    final borderColor = isRead ? const Color(0xFFBFCABA) : (isCritical ? const Color(0xFFFFCDD2) : const Color(0xFFBFCABA));
+    final accentColor = isCritical ? const Color(0xFFB71C1C) : AppColors.primary;
+    final icon = isCritical ? Icons.warning_rounded : Icons.info_outline_rounded;
+    final iconColor = isCritical ? const Color(0xFFB71C1C) : AppColors.primary;
 
     return GestureDetector(
       onTap: onTap,
       child: Container(
         margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 5),
         decoration: BoxDecoration(
-          color: data.isRead ? Colors.white : const Color(0xFFF0FAF0),
+          color: bgColor,
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(
-            color: data.isRead
-                ? const Color(0xFFBFCABA)
-                : cfg.borderColor,
-          ),
+          border: Border.all(color: borderColor),
           boxShadow: [
             BoxShadow(
               color: Colors.black.withValues(alpha: 0.04),
@@ -325,12 +338,11 @@ class _NotifTile extends StatelessWidget {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Unread accent bar
-            if (!data.isRead)
+            if (!isRead)
               Container(
                 width: 4,
                 decoration: BoxDecoration(
-                  color: cfg.accentColor,
+                  color: accentColor,
                   borderRadius: const BorderRadius.only(
                     topLeft: Radius.circular(16),
                     bottomLeft: Radius.circular(16),
@@ -347,10 +359,10 @@ class _NotifTile extends StatelessWidget {
                       width: 40,
                       height: 40,
                       decoration: BoxDecoration(
-                        color: cfg.iconBg,
+                        color: isCritical ? const Color(0xFFFFEBEE) : const Color(0xFFE8F5E9),
                         borderRadius: BorderRadius.circular(11),
                       ),
-                      child: Icon(cfg.icon, color: cfg.iconColor, size: 20),
+                      child: Icon(icon, color: iconColor, size: 20),
                     ),
                     const SizedBox(width: 12),
                     Expanded(
@@ -362,30 +374,19 @@ class _NotifTile extends StatelessWidget {
                             children: [
                               Expanded(
                                 child: Text(
-                                  data.title,
+                                  '${alert.type.toUpperCase()} — ${alert.parameter}',
                                   style: GoogleFonts.plusJakartaSans(
                                     fontSize: 14,
-                                    fontWeight: data.isRead
-                                        ? FontWeight.w600
-                                        : FontWeight.w700,
+                                    fontWeight: isRead ? FontWeight.w600 : FontWeight.w700,
                                     color: const Color(0xFF1A1A1A),
                                   ),
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              Text(
-                                data.time,
-                                style: GoogleFonts.manrope(
-                                  fontSize: 11,
-                                  color: const Color(0xFF6B7A6B),
-                                  fontWeight: FontWeight.w500,
                                 ),
                               ),
                             ],
                           ),
                           const SizedBox(height: 5),
                           Text(
-                            data.body,
+                            alert.message,
                             style: GoogleFonts.plusJakartaSans(
                               fontSize: 12,
                               fontWeight: FontWeight.w500,
@@ -396,20 +397,17 @@ class _NotifTile extends StatelessWidget {
                           const SizedBox(height: 10),
                           Row(
                             children: [
-                              _TypeBadge(label: cfg.badgeLabel, color: cfg.accentColor, bg: cfg.iconBg),
+                              _TypeBadge(
+                                label: isCritical ? 'CRITICAL' : 'WARNING',
+                                color: accentColor,
+                                bg: isCritical ? const Color(0xFFFFEBEE) : const Color(0xFFE8F5E9),
+                              ),
                               const Spacer(),
-                              if (data.type == _NotifType.critical)
+                              if (!isRead)
                                 _ActionChip(
                                   label: 'View Details',
-                                  color: cfg.accentColor,
+                                  color: accentColor,
                                   onTap: onTap,
-                                ),
-                              if (data.type == _NotifType.recommendation &&
-                                  data.title.contains('Irrigation'))
-                                _ActionChip(
-                                  label: 'Irrigate Now',
-                                  color: cfg.accentColor,
-                                  onTap: () {},
                                 ),
                             ],
                           ),
@@ -483,8 +481,6 @@ class _ActionChip extends StatelessWidget {
   }
 }
 
-// ─── Empty State ──────────────────────────────────────────────────────────────
-
 class _EmptyState extends StatelessWidget {
   const _EmptyState();
 
@@ -533,97 +529,5 @@ class _EmptyState extends StatelessWidget {
         ),
       ),
     );
-  }
-}
-
-// ─── Data & Config ────────────────────────────────────────────────────────────
-
-enum _NotifType { critical, recommendation, system, summary, pest }
-
-class _NotifData {
-  final int id;
-  final _NotifType type;
-  final String title;
-  final String body;
-  final String time;
-  bool isRead;
-  final bool isToday;
-
-  _NotifData({
-    required this.id,
-    required this.type,
-    required this.title,
-    required this.body,
-    required this.time,
-    required this.isRead,
-    required this.isToday,
-  });
-}
-
-class _NotifConfig {
-  final IconData icon;
-  final Color iconColor;
-  final Color iconBg;
-  final Color accentColor;
-  final Color borderColor;
-  final String badgeLabel;
-
-  const _NotifConfig({
-    required this.icon,
-    required this.iconColor,
-    required this.iconBg,
-    required this.accentColor,
-    required this.borderColor,
-    required this.badgeLabel,
-  });
-}
-
-_NotifConfig _notifConfig(_NotifType type) {
-  switch (type) {
-    case _NotifType.critical:
-      return const _NotifConfig(
-        icon: Icons.warning_rounded,
-        iconColor: Color(0xFFB71C1C),
-        iconBg: Color(0xFFFFEBEE),
-        accentColor: Color(0xFFB71C1C),
-        borderColor: Color(0xFFFFCDD2),
-        badgeLabel: 'CRITICAL',
-      );
-    case _NotifType.recommendation:
-      return _NotifConfig(
-        icon: Icons.lightbulb_rounded,
-        iconColor: AppColors.primary,
-        iconBg: const Color(0xFFE8F5E9),
-        accentColor: AppColors.primary,
-        borderColor: const Color(0xFFC8E6C9),
-        badgeLabel: 'RECOMMENDATION',
-      );
-    case _NotifType.system:
-      return const _NotifConfig(
-        icon: Icons.router_rounded,
-        iconColor: Color(0xFF1565C0),
-        iconBg: Color(0xFFE3F2FD),
-        accentColor: Color(0xFF1565C0),
-        borderColor: Color(0xFFBBDEFB),
-        badgeLabel: 'SYSTEM',
-      );
-    case _NotifType.summary:
-      return const _NotifConfig(
-        icon: Icons.analytics_rounded,
-        iconColor: Color(0xFF00796B),
-        iconBg: Color(0xFFE0F2F1),
-        accentColor: Color(0xFF00796B),
-        borderColor: Color(0xFFB2DFDB),
-        badgeLabel: 'WEEKLY SUMMARY',
-      );
-    case _NotifType.pest:
-      return const _NotifConfig(
-        icon: Icons.pest_control_rounded,
-        iconColor: Color(0xFFE65100),
-        iconBg: Color(0xFFFFF3E0),
-        accentColor: Color(0xFFE65100),
-        borderColor: Color(0xFFFFE0B2),
-        badgeLabel: 'PEST WARNING',
-      );
   }
 }

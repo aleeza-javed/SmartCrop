@@ -23,10 +23,7 @@ class DefaultFirebaseOptions {
       case TargetPlatform.android:
         return android;
       case TargetPlatform.iOS:
-        throw UnsupportedError(
-          'DefaultFirebaseOptions have not been configured for ios - '
-          'you can reconfigure this by running the FlutterFire CLI again.',
-        );
+        return ios;
       case TargetPlatform.macOS:
         throw UnsupportedError(
           'DefaultFirebaseOptions have not been configured for macos - '
@@ -65,5 +62,16 @@ class DefaultFirebaseOptions {
     messagingSenderId: '1083437709603',
     projectId: 'smart-crop-ddf69',
     storageBucket: 'smart-crop-ddf69.firebasestorage.app',
+  );
+
+  static const FirebaseOptions ios = FirebaseOptions(
+    apiKey: 'AIzaSyCaEE3hXbGLj_oesWxvEaDdV84DQUkCayE',
+    appId: '1:1083437709603:ios:a82f94067d109a8992f496',
+    messagingSenderId: '1083437709603',
+    projectId: 'smart-crop-ddf69',
+    storageBucket: 'smart-crop-ddf69.firebasestorage.app',
+    iosClientId:
+        '1083437709603-ovvecn8f69o1ildh8p8pqdc09ekche70.apps.googleusercontent.com',
+    iosBundleId: 'com.smartcrop.smart-crop',
   );
 }

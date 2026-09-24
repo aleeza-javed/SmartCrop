@@ -71,9 +71,31 @@ class _IrrigationScheduleScreenState extends State<IrrigationScheduleScreen> {
 
     return Scaffold(
       backgroundColor: const Color(0xFFF4F6F3),
+      appBar: AppBar(
+        backgroundColor: const Color(0xFF1B5E20),
+        foregroundColor: Colors.white,
+        elevation: 0,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back_rounded, size: 24),
+          onPressed: () => Navigator.pop(context),
+        ),
+        title: Text(
+          'Irrigation Schedule',
+          style: GoogleFonts.plusJakartaSans(
+            fontSize: 20,
+            fontWeight: FontWeight.w700,
+            color: Colors.white,
+            letterSpacing: -0.3,
+          ),
+        ),
+        centerTitle: false,
+        systemOverlayStyle: const SystemUiOverlayStyle(
+          statusBarColor: Colors.transparent,
+          statusBarIconBrightness: Brightness.light,
+        ),
+      ),
       body: Column(
         children: [
-          _Header(onBack: () => Navigator.pop(context)),
           Expanded(
             child: ListView(
               padding: const EdgeInsets.only(bottom: 100),
@@ -160,77 +182,6 @@ class _IrrigationScheduleScreenState extends State<IrrigationScheduleScreen> {
         label: Text(
           'Create Schedule',
           style: GoogleFonts.plusJakartaSans(fontSize: 14, fontWeight: FontWeight.w700),
-        ),
-      ),
-    );
-  }
-}
-
-// ─── Header ──────────────────────────────────────────────────────────────────
-
-class _Header extends StatelessWidget {
-  final VoidCallback onBack;
-  const _Header({required this.onBack});
-
-  @override
-  Widget build(BuildContext context) {
-    final topPad = MediaQuery.of(context).padding.top;
-    return Container(
-      width: double.infinity,
-      decoration: const BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [Color(0xFF1B5E20), Color(0xFF2E7D32)],
-        ),
-        borderRadius: BorderRadius.only(
-          bottomLeft: Radius.circular(28),
-          bottomRight: Radius.circular(28),
-        ),
-      ),
-      child: Padding(
-        padding: EdgeInsets.only(top: topPad + 12, bottom: 24, left: 16, right: 16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                GestureDetector(
-                  onTap: onBack,
-                  child: Container(
-                    width: 40,
-                    height: 40,
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.15),
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: const Icon(Icons.arrow_back_rounded, color: Colors.white, size: 22),
-                  ),
-                ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Text(
-                    'Irrigation Schedule',
-                    style: GoogleFonts.plusJakartaSans(
-                      fontSize: 20,
-                      fontWeight: FontWeight.w700,
-                      color: Colors.white,
-                      letterSpacing: -0.3,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 10),
-            Text(
-              'Optimize hydration with AI-driven precision.',
-              style: GoogleFonts.plusJakartaSans(
-                fontSize: 13,
-                fontWeight: FontWeight.w500,
-                color: Colors.white.withValues(alpha: 0.8),
-              ),
-            ),
-          ],
         ),
       ),
     );

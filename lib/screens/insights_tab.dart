@@ -1,12 +1,69 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import '../models/sensor_data.dart';
+import '../services/crop_api_service.dart';
 import '../theme/app_colors.dart';
 import 'ai_crop_screen.dart';
 import 'fertilizer_screen.dart';
 import 'irrigation_screen.dart';
 
-class InsightsTab extends StatelessWidget {
-  const InsightsTab({super.key});
+class InsightsTab extends StatefulWidget {
+  final SensorData? sensorData;
+  final String crop;
+  const InsightsTab({super.key, this.sensorData, this.crop = 'wheat'});
+
+  @override
+  State<InsightsTab> createState() => _InsightsTabState();
+}
+
+class _InsightsTabState extends State<InsightsTab> {
+  int _alertCount = 0;
+  bool _loadingAlerts = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchAlertCount();
+  }
+
+  Future<void> _fetchAlertCount() async {
+    final data = widget.sensorData;
+    if (data == null) return;
+    setState(() {
+      _loadingAlerts = true;
+    });
+    try {
+      final current = {
+        'N': data.n,
+        'P': data.p,
+        'K': data.k,
+        'temperature': data.airTemp,
+        'humidity': data.airHumidity,
+        'ph': data.pH,
+        'soil_moisture': data.soilMoisturePercent,
+      };
+      final result = await CropApiService.getMonitoringAlerts(
+        crop: widget.crop,
+        current: current,
+      );
+      setState(() {
+        _alertCount = result.alerts.length;
+        _loadingAlerts = false;
+      });
+    } catch (e) {
+      setState(() {
+        _loadingAlerts = false;
+      });
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant InsightsTab oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.crop != widget.crop) {
+      _fetchAlertCount();
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -35,7 +92,6 @@ class InsightsTab extends StatelessWidget {
           ),
           const SizedBox(height: 24),
 
-          // ── Crop Prediction card ──
           _InsightEntryCard(
             title: 'AI Crop Prediction',
             subtitle: 'Find the best crop for your current soil conditions',
@@ -45,27 +101,33 @@ class InsightsTab extends StatelessWidget {
             badgeColor: AppColors.primary,
             onTap: () => Navigator.push(
               context,
-              MaterialPageRoute(builder: (_) => const AiCropScreen()),
+              MaterialPageRoute(builder: (_) => AiCropScreen(sensorData: widget.sensorData)),
             ),
           ),
           const SizedBox(height: 14),
 
-          // ── Fertilizer Advisor card ──
           _InsightEntryCard(
             title: 'Fertilizer Advisor',
             subtitle: 'Get AI suggestions when soil nutrients are off-balance',
             icon: Icons.science_rounded,
             iconBg: const Color(0xFF6A1B9A),
-            badge: '1 Alert',
-            badgeColor: const Color(0xFF856404),
-            onTap: () => Navigator.push(
-              context,
-              MaterialPageRoute(builder: (_) => const FertilizerScreen()),
-            ),
-          ),
+            badge: _loadingAlerts
+                ? '...'
+                : '$_alertCount Alert${_alertCount != 1 ? 's' : ''}',
+            badgeColor: _alertCount > 0 ? const Color(0xFF856404) : AppColors.primary,
+onTap: () => Navigator.push(
+               context,
+               MaterialPageRoute(
+                 builder: (_) => FertilizerScreen(
+                   sensorData: widget.sensorData,
+                   crop: widget.crop,
+                 ),
+               ),
+             ),
+           ),
+           const SizedBox(height: 14),
           const SizedBox(height: 14),
 
-          // ── Irrigation Scheduler card ──
           _InsightEntryCard(
             title: 'Irrigation Scheduler',
             subtitle: 'Auto-schedule irrigation based on soil moisture & weather',
@@ -80,7 +142,6 @@ class InsightsTab extends StatelessWidget {
           ),
           const SizedBox(height: 32),
 
-          // ── Coming soon section ──
           Text(
             'Coming Soon',
             style: GoogleFonts.plusJakartaSans(
@@ -107,8 +168,6 @@ class InsightsTab extends StatelessWidget {
     );
   }
 }
-
-// ─── Entry Card ───────────────────────────────────────────────────────────────
 
 class _InsightEntryCard extends StatelessWidget {
   final String title;
@@ -210,8 +269,6 @@ class _InsightEntryCard extends StatelessWidget {
   }
 }
 
-// ─── Coming Soon Card ─────────────────────────────────────────────────────────
-
 class _ComingSoonCard extends StatelessWidget {
   final IconData icon;
   final String title;
@@ -241,8 +298,7 @@ class _ComingSoonCard extends StatelessWidget {
               color: AppColors.outlineVariant.withValues(alpha: 0.5),
               borderRadius: BorderRadius.circular(12),
             ),
-            child:
-                Icon(icon, color: AppColors.outline, size: 20),
+            child: Icon(icon, color: AppColors.outline, size: 20),
           ),
           const SizedBox(width: 14),
           Expanded(

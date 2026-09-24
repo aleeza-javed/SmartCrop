@@ -1,10 +1,69 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
+import '../models/sensor_data.dart';
+import '../services/crop_api_service.dart';
 import '../theme/app_colors.dart';
 
-class SensorAlertDetailScreen extends StatelessWidget {
-  const SensorAlertDetailScreen({super.key});
+class SensorAlertDetailScreen extends StatefulWidget {
+  final SensorData? sensorData;
+  final String crop;
+  const SensorAlertDetailScreen({super.key, this.sensorData, this.crop = 'wheat'});
+
+  @override
+  State<SensorAlertDetailScreen> createState() => _SensorAlertDetailScreenState();
+}
+
+class _SensorAlertDetailScreenState extends State<SensorAlertDetailScreen> {
+  bool _loading = true;
+  MonitoringResult? _monitorResult;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchMonitoringData();
+  }
+
+  Future<void> _fetchMonitoringData() async {
+    final data = widget.sensorData;
+    if (data == null) {
+      setState(() {
+        _error = 'Sensor data unavailable';
+        _loading = false;
+      });
+      return;
+    }
+    setState(() {
+      _loading = true;
+      _monitorResult = null;
+      _error = null;
+    });
+    try {
+      final current = {
+        'N': data.n,
+        'P': data.p,
+        'K': data.k,
+        'temperature': data.airTemp,
+        'humidity': data.airHumidity,
+        'ph': data.pH,
+        'soil_moisture': data.soilMoisturePercent,
+      };
+      final result = await CropApiService.getMonitoringAlerts(
+        crop: widget.crop,
+        current: current,
+      );
+      setState(() {
+        _monitorResult = result;
+        _loading = false;
+      });
+    } catch (e) {
+      setState(() {
+        _error = 'Failed to load monitoring data: $e';
+        _loading = false;
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -24,32 +83,14 @@ class SensorAlertDetailScreen extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _AlertHeroBanner(),
-                  const SizedBox(height: 20),
-                  const Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 16),
-                    child: _NPKCard(),
-                  ),
-                  const SizedBox(height: 16),
-                  const Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 16),
-                    child: _SectorMapCard(),
-                  ),
-                  const SizedBox(height: 16),
-                  const Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 16),
-                    child: _SoilConditionsRow(),
-                  ),
-                  const SizedBox(height: 16),
-                  const Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 16),
-                    child: _AIRecommendationCard(),
-                  ),
-                  const SizedBox(height: 28),
-                  const Padding(
-                    padding: EdgeInsets.symmetric(horizontal: 16),
-                    child: _ActionButtons(),
-                  ),
+                  if (_loading)
+                    const Center(child: CircularProgressIndicator())
+                  else if (_error != null)
+                    _ErrorWidget(message: _error!)
+                  else if (_monitorResult == null)
+                    const Center(child: Text('No monitoring data available'))
+                  else
+                    _buildContent(),
                 ],
               ),
             ),
@@ -58,9 +99,84 @@ class SensorAlertDetailScreen extends StatelessWidget {
       ),
     );
   }
+
+  Widget _buildContent() {
+    final result = _monitorResult!;
+    final alerts = result.alerts;
+    final paramResults = result.parameterResults;
+    final sensorData = widget.sensorData!;
+
+    return Column(
+      children: [
+        _AlertHeroBanner(
+          alerts: alerts,
+          overallStatus: result.overallStatus,
+          crop: widget.crop,
+        ),
+        const SizedBox(height: 20),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: _NPKCard(
+            sensorData: sensorData,
+            paramResults: paramResults,
+          ),
+        ),
+        const SizedBox(height: 16),
+        const _SectorMapCard(),
+        const SizedBox(height: 16),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: _SoilConditionsRow(sensorData: sensorData),
+        ),
+        const SizedBox(height: 16),
+        _AIRecommendationCard(
+          alerts: alerts,
+          recommendations: result.recommendations,
+          overallStatus: result.overallStatus,
+        ),
+        const SizedBox(height: 28),
+        const Padding(
+          padding: EdgeInsets.symmetric(horizontal: 16),
+          child: _ActionButtons(),
+        ),
+      ],
+    );
+  }
 }
 
-// ─── Header ──────────────────────────────────────────────────────────────────
+class _ErrorWidget extends StatelessWidget {
+  final String message;
+  const _ErrorWidget({required this.message});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFEBEE),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFFFFCDD2), width: 1),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.error_outline_rounded, color: Color(0xFFBA1A1A), size: 20),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              message,
+              style: GoogleFonts.manrope(
+                fontSize: 12,
+                color: const Color(0xFF4A3000),
+                fontWeight: FontWeight.w500,
+                height: 1.4,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
 
 class _Header extends StatelessWidget {
   final VoidCallback onBack;
@@ -126,23 +242,38 @@ class _Header extends StatelessWidget {
   }
 }
 
-// ─── Alert Hero Banner ────────────────────────────────────────────────────────
-
 class _AlertHeroBanner extends StatelessWidget {
+  final List<MonitoringAlert> alerts;
+  final String overallStatus;
+  final String crop;
+  const _AlertHeroBanner({
+    required this.alerts,
+    required this.overallStatus,
+    required this.crop,
+  });
+
   @override
   Widget build(BuildContext context) {
+    final hasAlert = alerts.isNotEmpty;
+    final isCritical = overallStatus == 'CRITICAL';
+    final bannerColor = isCritical ? const Color(0xFF7F0000) : const Color(0xFF1B5E20);
+    final bannerSecondary = isCritical ? const Color(0xFFB71C1C) : const Color(0xFF2E7D32);
+    final alertLabel = hasAlert
+        ? '${alerts.first.type.toUpperCase()} ALERT'
+        : 'NORMAL';
+
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 20, 16, 0),
       decoration: BoxDecoration(
-        gradient: const LinearGradient(
+        gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [Color(0xFF7F0000), Color(0xFFB71C1C)],
+          colors: [bannerColor, bannerSecondary],
         ),
         borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFFB71C1C).withValues(alpha: 0.3),
+            color: bannerSecondary.withValues(alpha: 0.3),
             blurRadius: 20,
             offset: const Offset(0, 8),
           ),
@@ -150,7 +281,6 @@ class _AlertHeroBanner extends StatelessWidget {
       ),
       child: Stack(
         children: [
-          // Decorative circle
           Positioned(
             top: -30,
             right: -30,
@@ -194,7 +324,7 @@ class _AlertHeroBanner extends StatelessWidget {
                           const Icon(Icons.warning_rounded, color: Colors.white, size: 13),
                           const SizedBox(width: 5),
                           Text(
-                            'CRITICAL ALERT',
+                            hasAlert ? 'CRITICAL ALERT' : 'NORMAL',
                             style: GoogleFonts.manrope(
                               fontSize: 11,
                               fontWeight: FontWeight.w800,
@@ -207,7 +337,7 @@ class _AlertHeroBanner extends StatelessWidget {
                     ),
                     const Spacer(),
                     Text(
-                      'May 24, 2024 • 08:14 AM',
+                      alertLabel,
                       style: GoogleFonts.manrope(
                         fontSize: 11,
                         fontWeight: FontWeight.w500,
@@ -218,7 +348,9 @@ class _AlertHeroBanner extends StatelessWidget {
                 ),
                 const SizedBox(height: 16),
                 Text(
-                  'Low Nitrogen Alert',
+                  hasAlert
+                      ? '${alerts.first.type == 'deficiency' ? 'Deficiency' : 'Excess'} Alert — ${alerts.first.parameter}'
+                      : '$crop Monitoring Normal',
                   style: GoogleFonts.plusJakartaSans(
                     fontSize: 22,
                     fontWeight: FontWeight.w800,
@@ -228,7 +360,7 @@ class _AlertHeroBanner extends StatelessWidget {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  'Sector A-12',
+                  crop.toUpperCase(),
                   style: GoogleFonts.plusJakartaSans(
                     fontSize: 15,
                     fontWeight: FontWeight.w600,
@@ -247,23 +379,7 @@ class _AlertHeroBanner extends StatelessWidget {
                       const Icon(Icons.grass_rounded, color: Colors.white, size: 16),
                       const SizedBox(width: 8),
                       Text(
-                        'Winter Wheat',
-                        style: GoogleFonts.plusJakartaSans(
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
-                          color: Colors.white,
-                        ),
-                      ),
-                      Container(
-                        margin: const EdgeInsets.symmetric(horizontal: 10),
-                        width: 1,
-                        height: 14,
-                        color: Colors.white.withValues(alpha: 0.3),
-                      ),
-                      const Icon(Icons.timeline_rounded, color: Colors.white, size: 16),
-                      const SizedBox(width: 8),
-                      Text(
-                        'Tillering Stage',
+                        crop,
                         style: GoogleFonts.plusJakartaSans(
                           fontSize: 13,
                           fontWeight: FontWeight.w600,
@@ -282,10 +398,10 @@ class _AlertHeroBanner extends StatelessWidget {
   }
 }
 
-// ─── NPK Card ─────────────────────────────────────────────────────────────────
-
 class _NPKCard extends StatelessWidget {
-  const _NPKCard();
+  final SensorData sensorData;
+  final Map<String, dynamic> paramResults;
+  const _NPKCard({required this.sensorData, required this.paramResults});
 
   @override
   Widget build(BuildContext context) {
@@ -330,45 +446,54 @@ class _NPKCard extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 20),
-            const _NutrientBar(
+            _NutrientBar(
               symbol: 'N',
               name: 'Nitrogen',
-              value: 38,
+              value: sensorData.n,
               maxValue: 120,
-              optimalMin: 60,
-              optimalMax: 90,
+              optimalMin: 107,
+              optimalMax: 131,
               unit: 'ppm',
-              status: 'Low Level Detected',
-              isLow: true,
+              status: _getStatusText('N'),
+              isLow: sensorData.n < 107,
             ),
             const SizedBox(height: 18),
-            const _NutrientBar(
+            _NutrientBar(
               symbol: 'P',
               name: 'Phosphorus',
-              value: 24,
+              value: sensorData.p,
               maxValue: 60,
-              optimalMin: 20,
-              optimalMax: 40,
+              optimalMin: 48,
+              optimalMax: 74,
               unit: 'ppm',
-              status: 'Normal Level',
-              isLow: false,
+              status: _getStatusText('P'),
+              isLow: sensorData.p < 48,
             ),
             const SizedBox(height: 18),
-            const _NutrientBar(
+            _NutrientBar(
               symbol: 'K',
               name: 'Potassium',
-              value: 210,
-              maxValue: 300,
-              optimalMin: 180,
-              optimalMax: 250,
+              value: sensorData.k,
+              maxValue: 54,
+              optimalMin: 35,
+              optimalMax: 54,
               unit: 'ppm',
-              status: 'Normal Level',
-              isLow: false,
+              status: _getStatusText('K'),
+              isLow: sensorData.k < 35,
             ),
           ],
         ),
       ),
     );
+  }
+
+  String _getStatusText(String param) {
+    final result = paramResults[param];
+    if (result == null) return 'Normal Level';
+    final status = result['status'] as String? ?? '';
+    if (status == 'CRITICAL') return 'Critical Level';
+    if (status == 'WARNING') return 'Warning Level';
+    return 'Normal Level';
   }
 }
 
@@ -398,9 +523,7 @@ class _NutrientBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final fillColor = isLow ? const Color(0xFFE65100) : AppColors.primary;
-    final statusBg = isLow
-        ? const Color(0xFFFFF3E0)
-        : const Color(0xFFE8F5E9);
+    final statusBg = isLow ? const Color(0xFFFFF3E0) : const Color(0xFFE8F5E9);
     final statusColor = isLow ? const Color(0xFFE65100) : AppColors.primary;
 
     return Column(
@@ -454,7 +577,7 @@ class _NutrientBar extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
                 Text(
-                  '${value.toInt()} $unit',
+                  '${value.toStringAsFixed(0)} $unit',
                   style: GoogleFonts.jetBrainsMono(
                     fontSize: 15,
                     fontWeight: FontWeight.w700,
@@ -490,7 +613,6 @@ class _NutrientBar extends StatelessWidget {
 
             return Stack(
               children: [
-                // Track
                 Container(
                   height: 8,
                   decoration: BoxDecoration(
@@ -498,7 +620,6 @@ class _NutrientBar extends StatelessWidget {
                     borderRadius: BorderRadius.circular(4),
                   ),
                 ),
-                // Optimal range highlight
                 Positioned(
                   left: optMinX,
                   child: Container(
@@ -510,7 +631,6 @@ class _NutrientBar extends StatelessWidget {
                     ),
                   ),
                 ),
-                // Fill
                 Container(
                   height: 8,
                   width: fillWidth,
@@ -534,8 +654,6 @@ class _NutrientBar extends StatelessWidget {
     );
   }
 }
-
-// ─── Sector Map Card ──────────────────────────────────────────────────────────
 
 class _SectorMapCard extends StatelessWidget {
   const _SectorMapCard();
@@ -564,11 +682,9 @@ class _SectorMapCard extends StatelessWidget {
               painter: _MapGridPainter(),
               child: Container(),
             ),
-            // Sector marker
             const Center(
               child: _PulsingMarker(),
             ),
-            // Label
             Positioned(
               top: 14,
               left: 14,
@@ -590,7 +706,7 @@ class _SectorMapCard extends StatelessWidget {
                     Icon(Icons.location_on_rounded, size: 14, color: AppColors.primary),
                     const SizedBox(width: 5),
                     Text(
-                      'Sector A-12 Map View',
+                      'Field Map View',
                       style: GoogleFonts.plusJakartaSans(
                         fontSize: 12,
                         fontWeight: FontWeight.w700,
@@ -598,26 +714,6 @@ class _SectorMapCard extends StatelessWidget {
                       ),
                     ),
                   ],
-                ),
-              ),
-            ),
-            // Coordinates
-            Positioned(
-              bottom: 14,
-              right: 14,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF1A1A1A).withValues(alpha: 0.75),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Text(
-                  '31.4504° N, 73.1350° E',
-                  style: GoogleFonts.jetBrainsMono(
-                    fontSize: 10,
-                    fontWeight: FontWeight.w500,
-                    color: Colors.white,
-                  ),
                 ),
               ),
             ),
@@ -646,7 +742,6 @@ class _MapGridPainter extends CustomPainter {
       canvas.drawLine(Offset(0, y), Offset(size.width, y), linePaint);
     }
 
-    // Sector outline
     final sectorPaint = Paint()
       ..color = const Color(0xFFFFEB3B).withValues(alpha: 0.6)
       ..style = PaintingStyle.stroke
@@ -732,10 +827,9 @@ class _PulsingMarkerState extends State<_PulsingMarker>
   }
 }
 
-// ─── Soil Conditions Row ──────────────────────────────────────────────────────
-
 class _SoilConditionsRow extends StatelessWidget {
-  const _SoilConditionsRow();
+  final SensorData sensorData;
+  const _SoilConditionsRow({required this.sensorData});
 
   @override
   Widget build(BuildContext context) {
@@ -746,9 +840,9 @@ class _SoilConditionsRow extends StatelessWidget {
             icon: Icons.water_drop_rounded,
             iconColor: const Color(0xFF1565C0),
             label: 'Soil Moisture',
-            value: '28',
+            value: sensorData.soilMoisturePercent.toStringAsFixed(0),
             unit: '%',
-            note: 'Slightly dry',
+            note: sensorData.soilMoisturePercent >= 40 ? 'Optimal' : sensorData.soilMoisturePercent >= 20 ? 'Low' : 'Dry',
           ),
         ),
         const SizedBox(width: 12),
@@ -757,9 +851,9 @@ class _SoilConditionsRow extends StatelessWidget {
             icon: Icons.science_rounded,
             iconColor: const Color(0xFF00796B),
             label: 'pH Level',
-            value: '6.4',
+            value: sensorData.pH.toStringAsFixed(1),
             unit: '',
-            note: 'Slightly acidic',
+            note: sensorData.pH >= 6.0 && sensorData.pH <= 7.5 ? 'Neutral' : sensorData.pH < 6.0 ? 'Acidic' : 'Alkaline',
           ),
         ),
       ],
@@ -865,13 +959,21 @@ class _ConditionTile extends StatelessWidget {
   }
 }
 
-// ─── AI Recommendation Card ───────────────────────────────────────────────────
-
 class _AIRecommendationCard extends StatelessWidget {
-  const _AIRecommendationCard();
+  final List<MonitoringAlert> alerts;
+  final List<String> recommendations;
+  final String overallStatus;
+  const _AIRecommendationCard({
+    required this.alerts,
+    required this.recommendations,
+    required this.overallStatus,
+  });
 
   @override
   Widget build(BuildContext context) {
+    final hasAlerts = alerts.isNotEmpty;
+    final isDeficiency = hasAlerts && alerts.any((a) => a.type == 'deficiency');
+
     return Container(
       decoration: BoxDecoration(
         color: Colors.white,
@@ -930,9 +1032,13 @@ class _AIRecommendationCard extends StatelessWidget {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFE8F5E9),
+                    color: hasAlerts ? const Color(0xFFFFEBEE) : const Color(0xFFE8F5E9),
                     borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: AppColors.primary.withValues(alpha: 0.3)),
+                    border: Border.all(
+                      color: hasAlerts
+                          ? AppColors.primary.withValues(alpha: 0.3)
+                          : AppColors.primary.withValues(alpha: 0.3),
+                    ),
                   ),
                   child: Row(
                     children: [
@@ -941,16 +1047,16 @@ class _AIRecommendationCard extends StatelessWidget {
                         height: 6,
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
-                          color: AppColors.primary,
+                          color: hasAlerts ? const Color(0xFFBA1A1A) : AppColors.primary,
                         ),
                       ),
                       const SizedBox(width: 5),
                       Text(
-                        'HIGH CONFIDENCE',
+                        hasAlerts ? 'ALERT' : 'NORMAL',
                         style: GoogleFonts.manrope(
                           fontSize: 9,
                           fontWeight: FontWeight.w800,
-                          color: AppColors.primary,
+                          color: hasAlerts ? const Color(0xFFBA1A1A) : AppColors.primary,
                           letterSpacing: 0.5,
                         ),
                       ),
@@ -960,90 +1066,98 @@ class _AIRecommendationCard extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 16),
-            Container(
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: const Color(0xFFFFF8E1),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: const Color(0xFFFFE082)),
-              ),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Icon(Icons.info_outline_rounded, size: 16, color: Color(0xFFE65100)),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      'Nutrient deficiency detected in Sector A-12. Nitrogen levels are critically below the optimal range for tillering wheat.',
-                      style: GoogleFonts.plusJakartaSans(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w500,
-                        color: const Color(0xFF4A3000),
-                        height: 1.5,
+            if (hasAlerts && recommendations.isNotEmpty)
+              ...List.generate(recommendations.length, (i) {
+                return Container(
+                  padding: const EdgeInsets.all(14),
+                  margin: const EdgeInsets.only(bottom: 10),
+                  decoration: BoxDecoration(
+                    color: isDeficiency ? const Color(0xFFFFF8E1) : const Color(0xFFE8F5E9),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: isDeficiency ? const Color(0xFFFFE082) : AppColors.primary.withValues(alpha: 0.25),
+                    ),
+                  ),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(
+                        isDeficiency ? Icons.info_outline_rounded : Icons.check_circle_outline_rounded,
+                        size: 16,
+                        color: isDeficiency ? const Color(0xFFE65100) : AppColors.primary,
                       ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 14),
-            Container(
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(
-                color: const Color(0xFFE8F5E9),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: AppColors.primary.withValues(alpha: 0.25)),
-              ),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Container(
-                    width: 28,
-                    height: 28,
-                    decoration: BoxDecoration(
-                      color: AppColors.primary,
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: const Icon(Icons.agriculture_rounded, color: Colors.white, size: 14),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Recommended Action',
-                          style: GoogleFonts.manrope(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w700,
-                            color: AppColors.primary,
-                            letterSpacing: 0.3,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          'Apply Nitrogen-rich fertilizer (Urea) at 50 kg/acre. Schedule within 48 hours to minimize yield impact.',
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          recommendations[i],
                           style: GoogleFonts.plusJakartaSans(
                             fontSize: 13,
-                            fontWeight: FontWeight.w600,
-                            color: const Color(0xFF1A3A1A),
+                            fontWeight: FontWeight.w500,
+                            color: isDeficiency ? const Color(0xFF4A3000) : const Color(0xFF1A3A1A),
                             height: 1.5,
                           ),
                         ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
-                ],
+                );
+              }),
+            if (!hasAlerts)
+              Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: const Color(0xFFE8F5E9),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: AppColors.primary.withValues(alpha: 0.25)),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      width: 28,
+                      height: 28,
+                      decoration: BoxDecoration(
+                        color: AppColors.primary,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: const Icon(Icons.agriculture_rounded, color: Colors.white, size: 14),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Recommended Action',
+                            style: GoogleFonts.manrope(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                              color: AppColors.primary,
+                              letterSpacing: 0.3,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            'All nutrient levels are within the optimal range. No action needed at this time.',
+                            style: GoogleFonts.plusJakartaSans(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: const Color(0xFF1A3A1A),
+                              height: 1.5,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
               ),
-            ),
           ],
         ),
       ),
     );
   }
 }
-
-// ─── Action Buttons ───────────────────────────────────────────────────────────
 
 class _ActionButtons extends StatelessWidget {
   const _ActionButtons();
@@ -1052,7 +1166,6 @@ class _ActionButtons extends StatelessWidget {
   Widget build(BuildContext context) {
     return Column(
       children: [
-        // Schedule Fertilization
         SizedBox(
           width: double.infinity,
           height: 52,

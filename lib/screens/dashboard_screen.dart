@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../models/sensor_data.dart';
+import '../services/active_crop_service.dart';
 import '../services/sensor_service.dart';
 import '../theme/app_colors.dart';
 import 'sensors_screen.dart';
@@ -23,11 +24,78 @@ class DashboardScreen extends StatefulWidget {
   State<DashboardScreen> createState() => _DashboardScreenState();
 }
 
+const List<String> _kCropOptions = [
+  'Apple',
+  'Banana',
+  'Blackgram',
+  'Chickpea',
+  'Coconut',
+  'Coffee',
+  'Cotton',
+  'Grapes',
+  'Jute',
+  'Kidneybeans',
+  'Lentil',
+  'Maize',
+  'Mango',
+  'Mothbeans',
+  'Mungbean',
+  'Muskmelon',
+  'Mustard',
+  'Onion',
+  'Orange',
+  'Papaya',
+  'Pigeonpeas',
+  'Pomegranate',
+  'Rice',
+  'Sorghum',
+  'Sugarcane',
+  'Sunflower',
+  'Tobacco',
+  'Tomato',
+  'Watermelon',
+  'Wheat',
+];
+
+const List<String> _kCropApiNames = [
+  'apple',
+  'banana',
+  'blackgram',
+  'chickpea',
+  'coconut',
+  'coffee',
+  'cotton',
+  'grapes',
+  'jute',
+  'kidneybeans',
+  'lentil',
+  'maize',
+  'mango',
+  'mothbeans',
+  'mungbean',
+  'muskmelon',
+  'mustard',
+  'onion',
+  'orange',
+  'papaya',
+  'pigeonpeas',
+  'pomegranate',
+  'rice',
+  'sorghum',
+  'sugarcane',
+  'sunflower',
+  'tobacco',
+  'tomato',
+  'watermelon',
+  'wheat',
+];
+
 class _DashboardScreenState extends State<DashboardScreen> {
   int _selectedTab = 0;
   final SensorService _sensorService = SensorService();
   SensorData? _sensorData;
   StreamSubscription<SensorData>? _subscription;
+  String _activeCrop = 'wheat';
 
   @override
   void initState() {
@@ -36,15 +104,30 @@ class _DashboardScreenState extends State<DashboardScreen> {
       statusBarColor: Colors.transparent,
       statusBarIconBrightness: Brightness.dark,
     ));
+    _loadActiveCrop();
     _subscription = _sensorService.sensorDataStream().listen((data) {
       if (mounted) setState(() => _sensorData = data);
     });
+  }
+
+  Future<void> _loadActiveCrop() async {
+    final crop = await ActiveCropService.getActiveCrop();
+    if (mounted) setState(() => _activeCrop = crop);
+  }
+
+  Future<void> _setActiveCrop(String crop) async {
+    await ActiveCropService.setActiveCrop(crop);
+    if (mounted) setState(() => _activeCrop = crop);
   }
 
   @override
   void dispose() {
     _subscription?.cancel();
     super.dispose();
+  }
+
+  void _setCrop(int index) {
+    _setActiveCrop(_kCropApiNames[index]);
   }
 
   @override
@@ -54,17 +137,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
       backgroundColor: AppColors.background,
       body: Column(
         children: [
-          _TopBar(topPad: topPad),
-          Expanded(
-            child: switch (_selectedTab) {
-              0 => _HomeTab(
+_TopBar(topPad: topPad, sensorData: _sensorData, crop: _activeCrop),
+              Expanded(
+                child: switch (_selectedTab) {
+0 => _HomeTab(
                   sensorData: _sensorData,
+                  crop: _activeCrop,
                   onViewSensors: () => setState(() => _selectedTab = 1),
+                  onCropChanged: (index) => _setCrop(index),
+                  onAcceptCrop: (crop) => _setActiveCrop(crop),
                 ),
-              1 => const SensorsTab(),
-              2 => const InsightsTab(),
-              3 => const ReportsTab(),
-              4 => const ProfileScreen(),
+                  1 => SensorsTab(crop: _activeCrop),
+                  2 => InsightsTab(sensorData: _sensorData, crop: _activeCrop),
+                  3 => const ReportsTab(),
+                  4 => const ProfileScreen(),
               _ => Center(
                   child: Text(
                     _tabLabel(_selectedTab),
@@ -110,8 +196,17 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
 class _HomeTab extends StatelessWidget {
   final SensorData? sensorData;
+  final String crop;
   final VoidCallback onViewSensors;
-  const _HomeTab({required this.sensorData, required this.onViewSensors});
+  final ValueChanged<int> onCropChanged;
+  final ValueChanged<String>? onAcceptCrop;
+  const _HomeTab({
+    required this.sensorData,
+    required this.crop,
+    required this.onViewSensors,
+    required this.onCropChanged,
+    this.onAcceptCrop,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -168,28 +263,55 @@ class _HomeTab extends StatelessWidget {
               onTap: onViewSensors,
             ),
           ),
-          const SizedBox(height: 28),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Text(
-              'AI Recommendation',
-              style: GoogleFonts.plusJakartaSans(
-                fontSize: 18,
-                fontWeight: FontWeight.w700,
-                color: AppColors.onBackground,
-              ),
-            ),
-          ),
-          const SizedBox(height: 14),
-          const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 16),
-            child: _AiRecommendationCard(),
-          ),
-          const SizedBox(height: 28),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: _StatusAlert(sensorData: data),
-          ),
+const SizedBox(height: 28),
+           Padding(
+             padding: const EdgeInsets.symmetric(horizontal: 16),
+             child: Row(
+               mainAxisAlignment: MainAxisAlignment.spaceBetween,
+               children: [
+                 Text(
+                   'Active Crop',
+                   style: GoogleFonts.plusJakartaSans(
+                     fontSize: 18,
+                     fontWeight: FontWeight.w700,
+                     color: AppColors.onBackground,
+                   ),
+                 ),
+                 _CropSelector(
+                   crop: crop,
+                   onChanged: onCropChanged,
+                 ),
+               ],
+             ),
+           ),
+           const SizedBox(height: 14),
+           Padding(
+             padding: const EdgeInsets.symmetric(horizontal: 16),
+             child: _ActiveCropCard(crop: crop),
+           ),
+           const SizedBox(height: 28),
+           Padding(
+             padding: const EdgeInsets.symmetric(horizontal: 16),
+             child: Text(
+               'AI Recommendation',
+               style: GoogleFonts.plusJakartaSans(
+                 fontSize: 18,
+                 fontWeight: FontWeight.w700,
+                 color: AppColors.onBackground,
+               ),
+             ),
+           ),
+           const SizedBox(height: 14),
+           Padding(
+             padding: const EdgeInsets.symmetric(horizontal: 16),
+             child: _AiRecommendationCard(
+                 sensorData: data, crop: crop, onAcceptCrop: onAcceptCrop),
+           ),
+           const SizedBox(height: 28),
+           Padding(
+             padding: const EdgeInsets.symmetric(horizontal: 16),
+             child: _StatusAlert(sensorData: data),
+           ),
         ],
       ),
     );
@@ -200,7 +322,9 @@ class _HomeTab extends StatelessWidget {
 
 class _TopBar extends StatelessWidget {
   final double topPad;
-  const _TopBar({required this.topPad});
+  final SensorData? sensorData;
+  final String crop;
+  const _TopBar({required this.topPad, required this.sensorData, required this.crop});
 
   @override
   Widget build(BuildContext context) {
@@ -235,7 +359,12 @@ class _TopBar extends StatelessWidget {
           GestureDetector(
             onTap: () => Navigator.push(
               context,
-              MaterialPageRoute(builder: (_) => const NotificationsScreen()),
+              MaterialPageRoute(
+                builder: (_) => NotificationsScreen(
+                  sensorData: sensorData,
+                  crop: crop,
+                ),
+              ),
             ),
             child: Stack(
               children: [
@@ -808,10 +937,102 @@ class _OverviewCardIcon extends StatelessWidget {
   }
 }
 
+// ─── Active Crop Card ─────────────────────────────────────────────────
+
+class _ActiveCropCard extends StatelessWidget {
+  final String crop;
+  const _ActiveCropCard({required this.crop});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.06),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
+          ),
+        ],
+        border: Border.all(
+            color: AppColors.primary.withValues(alpha: 0.12), width: 1),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 48,
+            height: 48,
+            decoration: BoxDecoration(
+              color: AppColors.primary.withValues(alpha: 0.1),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              Icons.grass_rounded,
+              color: AppColors.primary,
+              size: 24,
+            ),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Active Crop',
+                  style: GoogleFonts.manrope(
+                    fontSize: 11,
+                    color: AppColors.onSurfaceVariant,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 0.5,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  crop[0].toUpperCase() + crop.substring(1),
+                  style: GoogleFonts.plusJakartaSans(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.onBackground,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            decoration: BoxDecoration(
+              color: AppColors.primary.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(999),
+            ),
+            child: Text(
+              'Selected',
+              style: GoogleFonts.manrope(
+                fontSize: 10,
+                fontWeight: FontWeight.w700,
+                color: AppColors.primary,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 // ─── AI Recommendation Card ───────────────────────────────────────────────────
 
 class _AiRecommendationCard extends StatelessWidget {
-  const _AiRecommendationCard();
+  final SensorData? sensorData;
+  final String crop;
+  final ValueChanged<String>? onAcceptCrop;
+  const _AiRecommendationCard({
+    this.sensorData,
+    required this.crop,
+    this.onAcceptCrop,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -850,7 +1071,7 @@ class _AiRecommendationCard extends StatelessWidget {
                 Row(
                   children: [
                     Text(
-                      'Wheat',
+                      crop[0].toUpperCase() + crop.substring(1),
                       style: GoogleFonts.plusJakartaSans(
                         fontSize: 17,
                         fontWeight: FontWeight.w700,
@@ -898,7 +1119,11 @@ class _AiRecommendationCard extends StatelessWidget {
           GestureDetector(
             onTap: () => Navigator.push(
               context,
-              MaterialPageRoute(builder: (_) => const AiCropScreen()),
+              MaterialPageRoute(builder: (_) => AiCropScreen(
+                        sensorData: sensorData,
+                        crop: crop,
+                        onAcceptCrop: onAcceptCrop,
+                      )),
             ),
             child: Container(
               padding:
@@ -974,6 +1199,69 @@ class _StatusAlert extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+// ─── Crop Selector ──────────────────────────────────────────────
+
+class _CropSelector extends StatelessWidget {
+  final String crop;
+  final ValueChanged<int> onChanged;
+  const _CropSelector({required this.crop, required this.onChanged});
+
+  @override
+  Widget build(BuildContext context) {
+    return PopupMenuButton<int>(
+      icon: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: AppColors.primary.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: AppColors.primary.withValues(alpha: 0.3)),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              crop[0].toUpperCase() + crop.substring(1),
+              style: GoogleFonts.plusJakartaSans(
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                color: AppColors.primary,
+              ),
+            ),
+            const SizedBox(width: 4),
+            const Icon(Icons.arrow_drop_down_rounded,
+                size: 16, color: AppColors.primary),
+          ],
+        ),
+      ),
+      itemBuilder: (context) {
+        return [
+          for (int i = 0; i < _kCropOptions.length; i++)
+            PopupMenuItem<int>(
+              value: i,
+              child: Row(
+                children: [
+                  if (crop == _kCropApiNames[i])
+                    const Icon(Icons.check_circle_rounded,
+                        size: 16, color: AppColors.primary),
+                  const SizedBox(width: 8),
+                  Text(
+                    _kCropOptions[i],
+                    style: GoogleFonts.plusJakartaSans(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.onBackground,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+        ];
+      },
+      onSelected: onChanged,
     );
   }
 }

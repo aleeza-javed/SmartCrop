@@ -1,9 +1,61 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import '../models/sensor_data.dart';
+import '../services/crop_api_service.dart';
 import '../theme/app_colors.dart';
 
-class FertilizerScreen extends StatelessWidget {
-  const FertilizerScreen({super.key});
+class FertilizerScreen extends StatefulWidget {
+  final SensorData? sensorData;
+  final String crop;
+  const FertilizerScreen({super.key, this.sensorData, this.crop = 'wheat'});
+
+  @override
+  State<FertilizerScreen> createState() => _FertilizerScreenState();
+}
+
+class _FertilizerScreenState extends State<FertilizerScreen> {
+  bool _loading = false;
+  Map<String, FertilizerRecommendation>? _recommendations;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _fetchRecommendations();
+  }
+
+  Future<void> _fetchRecommendations() async {
+    final data = widget.sensorData;
+    if (data == null) {
+      setState(() {
+        _error = 'Sensor data unavailable';
+        _loading = false;
+      });
+      return;
+    }
+    setState(() {
+      _loading = true;
+      _recommendations = null;
+      _error = null;
+    });
+    try {
+      final recs = await CropApiService.getFertilizerRecommendations(
+        crop: widget.crop,
+        n: data.n,
+        p: data.p,
+        k: data.k,
+      );
+      setState(() {
+        _recommendations = recs;
+        _loading = false;
+      });
+    } catch (e) {
+      setState(() {
+        _error = 'Failed to load recommendations: $e';
+        _loading = false;
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -18,70 +70,16 @@ class FertilizerScreen extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // ── Status overview ──
                   _StatusOverviewCard(),
                   const SizedBox(height: 24),
-
-                  // ── Alerts ──
                   _sectionTitle('Soil Alerts'),
                   const SizedBox(height: 12),
-                  const _AlertCard(
-                    icon: Icons.science_outlined,
-                    title: 'pH Slightly Acidic',
-                    detail: 'Current pH is 6.5. Optimal range is 6.5–7.0.',
-                    severity: _Severity.warning,
-                  ),
-                  const SizedBox(height: 10),
-                  const _AlertCard(
-                    icon: Icons.water_drop_outlined,
-                    title: 'Nitrogen Adequate',
-                    detail: 'N at 38 ppm is within the ideal range for wheat.',
-                    severity: _Severity.ok,
-                  ),
-                  const SizedBox(height: 10),
-                  const _AlertCard(
-                    icon: Icons.eco_outlined,
-                    title: 'Potassium Adequate',
-                    detail: 'K at 210 ppm. No additional input needed.',
-                    severity: _Severity.ok,
-                  ),
+                  _buildAlertsSection(),
                   const SizedBox(height: 24),
-
-                  // ── Recommendations ──
                   _sectionTitle('Fertilizer Recommendations'),
                   const SizedBox(height: 12),
-                  const _FertilizerCard(
-                    name: 'Agricultural Lime',
-                    purpose: 'pH Correction',
-                    rate: '500 kg/acre',
-                    timing: 'Before sowing',
-                    priority: _Priority.high,
-                    icon: Icons.layers_outlined,
-                    iconColor: Color(0xFF6A1B9A),
-                  ),
-                  const SizedBox(height: 10),
-                  const _FertilizerCard(
-                    name: 'Urea (46-0-0)',
-                    purpose: 'Nitrogen Top-up',
-                    rate: '25 kg/acre',
-                    timing: '3 weeks after sowing',
-                    priority: _Priority.medium,
-                    icon: Icons.grain_rounded,
-                    iconColor: Color(0xFF1565C0),
-                  ),
-                  const SizedBox(height: 10),
-                  const _FertilizerCard(
-                    name: 'DAP (18-46-0)',
-                    purpose: 'Phosphorus Boost',
-                    rate: '30 kg/acre',
-                    timing: 'At sowing',
-                    priority: _Priority.low,
-                    icon: Icons.spa_outlined,
-                    iconColor: Color(0xFF2E7D32),
-                  ),
+                  _buildRecommendationsSection(),
                   const SizedBox(height: 28),
-
-                  // ── Coming soon banner ──
                   Container(
                     width: double.infinity,
                     padding: const EdgeInsets.all(18),
@@ -141,6 +139,112 @@ class FertilizerScreen extends StatelessWidget {
     );
   }
 
+  Widget _buildAlertsSection() {
+    if (_loading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (_error != null) {
+      return _ErrorWidget(message: _error!);
+    }
+    if (_recommendations == null || _recommendations!.isEmpty) {
+      return const Center(child: Text('No data available'));
+    }
+    return Column(
+      children: _buildAlertCards(),
+    );
+  }
+
+  List<Widget> _buildAlertCards() {
+    final recs = _recommendations!;
+    final widgets = <Widget>[];
+    final nutrientLabels = {'N': 'Nitrogen', 'P': 'Phosphorus', 'K': 'Potassium'};
+    final nutrientIcons = {'N': Icons.water_drop_outlined, 'P': Icons.science_outlined, 'K': Icons.eco_outlined};
+
+    for (final entry in recs.entries) {
+      final symbol = entry.key;
+      final rec = entry.value;
+      final label = nutrientLabels[symbol] ?? symbol;
+      final icon = nutrientIcons[symbol] ?? Icons.science_outlined;
+
+      _Severity severity;
+      if (rec.status == 'deficient') {
+        severity = _Severity.warning;
+      } else if (rec.status == 'excess') {
+        severity = _Severity.critical;
+      } else {
+        severity = _Severity.ok;
+      }
+
+      widgets.add(_AlertCard(
+        icon: icon,
+        title: rec.status == 'sufficient'
+            ? '$label Adequate'
+            : '$label ${rec.status.capitalize()}',
+        detail: rec.advice,
+        severity: severity,
+      ));
+      widgets.add(const SizedBox(height: 10));
+    }
+    return widgets;
+  }
+
+  Widget _buildRecommendationsSection() {
+    if (_loading) {
+      return const Center(child: CircularProgressIndicator());
+    }
+    if (_error != null) {
+      return _ErrorWidget(message: _error!);
+    }
+    if (_recommendations == null || _recommendations!.isEmpty) {
+      return const Center(child: Text('No recommendations available'));
+    }
+    return Column(
+      children: _buildRecommendationCards(),
+    );
+  }
+
+  List<Widget> _buildRecommendationCards() {
+    final recs = _recommendations!;
+    final widgets = <Widget>[];
+    final nutrientNames = {'N': 'Urea (46-0-0)', 'P': 'DAP (18-46-0)', 'K': 'Muriate of Potash (0-0-60)'};
+    final nutrientColors = {'N': const Color(0xFF1565C0), 'P': const Color(0xFF2E7D32), 'K': const Color(0xFF6A1B9A)};
+
+    for (final entry in recs.entries) {
+      final symbol = entry.key;
+      final rec = entry.value;
+      if (rec.status == 'sufficient') continue;
+      final priority = rec.status == 'deficient' ? _Priority.high : _Priority.medium;
+      widgets.add(_FertilizerCard(
+        name: nutrientNames[symbol] ?? symbol,
+        purpose: '$symbol ${rec.status == 'deficient' ? 'Top-up' : 'Reduction'}',
+        rate: rec.deficit != null
+            ? '${rec.deficit!.toStringAsFixed(0)} kg/acre'
+            : rec.surplus != null
+                ? '${rec.surplus!.toStringAsFixed(0)} kg/acre'
+                : 'As needed',
+        timing: rec.status == 'deficient' ? 'Within 48 hours' : 'Monitor',
+        priority: priority,
+        icon: Icons.grain_rounded,
+        iconColor: nutrientColors[symbol] ?? AppColors.primary,
+      ));
+      widgets.add(const SizedBox(height: 10));
+    }
+    if (widgets.isEmpty) {
+      return const [
+        _FertilizerCard(
+          name: 'All Nutrients Balanced',
+          purpose: 'No action needed',
+          rate: '—',
+          timing: '—',
+          priority: _Priority.low,
+          icon: Icons.check_circle_outline_rounded,
+          iconColor: Color(0xFF2E7D32),
+        ),
+      ];
+    }
+    return widgets;
+  }
+
   Text _sectionTitle(String t) => Text(
         t,
         style: GoogleFonts.plusJakartaSans(
@@ -151,7 +255,39 @@ class FertilizerScreen extends StatelessWidget {
       );
 }
 
-// ─── Header ───────────────────────────────────────────────────────────────────
+class _ErrorWidget extends StatelessWidget {
+  final String message;
+  const _ErrorWidget({required this.message});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: const Color(0xFFFFEBEE),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFFFFCDD2), width: 1),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.error_outline_rounded, color: Color(0xFFBA1A1A), size: 20),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              message,
+              style: GoogleFonts.manrope(
+                fontSize: 12,
+                color: const Color(0xFF4A3000),
+                fontWeight: FontWeight.w500,
+                height: 1.4,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
 
 class _Header extends StatelessWidget {
   final double topPad;
@@ -199,8 +335,6 @@ class _Header extends StatelessWidget {
   }
 }
 
-// ─── Status Overview Card ─────────────────────────────────────────────────────
-
 class _StatusOverviewCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
@@ -238,7 +372,7 @@ class _StatusOverviewCard extends StatelessWidget {
                   borderRadius: BorderRadius.circular(999),
                 ),
                 child: Text(
-                  'Good',
+                  'Live',
                   style: GoogleFonts.manrope(
                     fontSize: 12,
                     fontWeight: FontWeight.w700,
@@ -251,7 +385,7 @@ class _StatusOverviewCard extends StatelessWidget {
           const SizedBox(height: 14),
           ClipRRect(
             borderRadius: BorderRadius.circular(6),
-            child: const LinearProgressIndicator(
+            child: LinearProgressIndicator(
               value: 0.74,
               minHeight: 8,
               backgroundColor: Color(0xFFE0E4D9),
@@ -260,7 +394,7 @@ class _StatusOverviewCard extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           Text(
-            '74 / 100 — Minor adjustments needed',
+            'Based on live sensor readings',
             style: GoogleFonts.manrope(
               fontSize: 11,
               color: AppColors.onSurfaceVariant,
@@ -272,10 +406,6 @@ class _StatusOverviewCard extends StatelessWidget {
     );
   }
 }
-
-// ─── Alert Card ───────────────────────────────────────────────────────────────
-
-enum _Severity { ok, warning, critical }
 
 class _AlertCard extends StatelessWidget {
   final IconData icon;
@@ -351,10 +481,6 @@ class _AlertCard extends StatelessWidget {
     );
   }
 }
-
-// ─── Fertilizer Card ──────────────────────────────────────────────────────────
-
-enum _Priority { high, medium, low }
 
 class _FertilizerCard extends StatelessWidget {
   final String name;
@@ -500,5 +626,16 @@ class _InfoChip extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+
+enum _Severity { ok, warning, critical }
+
+enum _Priority { high, medium, low }
+
+extension on String {
+  String capitalize() {
+    if (isEmpty) return this;
+    return this[0].toUpperCase() + substring(1);
   }
 }

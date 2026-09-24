@@ -189,10 +189,15 @@ class _Header extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: EdgeInsets.fromLTRB(16, topPad + 12, 16, 12),
+      padding: EdgeInsets.fromLTRB(8, topPad + 4, 16, 12),
       color: Colors.white,
       child: Row(
         children: [
+          IconButton(
+            icon: const Icon(Icons.arrow_back_rounded, size: 24),
+            onPressed: () => Navigator.pop(context),
+            color: AppColors.onBackground,
+          ),
           Image.asset(
             _logoAsset,
             width: 28,

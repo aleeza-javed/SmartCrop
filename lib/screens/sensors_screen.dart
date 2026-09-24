@@ -3,13 +3,15 @@ import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../models/sensor_data.dart';
+import '../services/crop_api_service.dart';
 import '../services/sensor_service.dart';
 import '../theme/app_colors.dart';
 import 'device_pairing_screen.dart';
 import 'sensor_alert_detail_screen.dart';
 
 class SensorsTab extends StatefulWidget {
-  const SensorsTab({super.key});
+  final String crop;
+  const SensorsTab({super.key, this.crop = 'wheat'});
 
   @override
   State<SensorsTab> createState() => _SensorsTabState();
@@ -19,13 +21,49 @@ class _SensorsTabState extends State<SensorsTab> {
   final SensorService _sensorService = SensorService();
   SensorData? _sensorData;
   StreamSubscription<SensorData>? _subscription;
+  int _alertCount = 0;
 
   @override
   void initState() {
     super.initState();
     _subscription = _sensorService.sensorDataStream().listen((data) {
-      if (mounted) setState(() => _sensorData = data);
+      if (mounted) {
+        setState(() => _sensorData = data);
+        _fetchAlertCount(data);
+      }
     });
+    _fetchAlertCount(null);
+  }
+
+  Future<void> _fetchAlertCount(SensorData? data) async {
+    final d = data ?? _sensorData;
+    if (d == null) return;
+    try {
+      final current = {
+        'N': d.n,
+        'P': d.p,
+        'K': d.k,
+        'temperature': d.airTemp,
+        'humidity': d.airHumidity,
+        'ph': d.pH,
+        'soil_moisture': d.soilMoisturePercent,
+      };
+      final result = await CropApiService.getMonitoringAlerts(
+        crop: widget.crop,
+        current: current,
+      );
+      if (mounted) {
+        setState(() => _alertCount = result.alerts.length);
+      }
+    } catch (_) {}
+  }
+
+  @override
+  void didUpdateWidget(covariant SensorsTab oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.crop != widget.crop) {
+      _fetchAlertCount(null);
+    }
   }
 
   @override
@@ -189,10 +227,15 @@ class _SensorsTabState extends State<SensorsTab> {
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: _AlertRow(
+              alertCount: _alertCount,
               onTap: () => Navigator.push(
                 context,
                 MaterialPageRoute(
-                    builder: (_) => const SensorAlertDetailScreen()),
+                    builder: (_) => SensorAlertDetailScreen(
+                      sensorData: _sensorData,
+                      crop: widget.crop,
+                    ),
+                  ),
               ),
             ),
           ),
@@ -1033,8 +1076,9 @@ class _DeviceCard extends StatelessWidget {
 // ─── Alert Row ────────────────────────────────────────────────────────────────
 
 class _AlertRow extends StatelessWidget {
+  final int alertCount;
   final VoidCallback onTap;
-  const _AlertRow({required this.onTap});
+  const _AlertRow({required this.alertCount, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
@@ -1075,18 +1119,24 @@ class _AlertRow extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'Low Nitrogen Alert — Sector A-12',
+                    alertCount > 0
+                        ? '$alertCount Active Alert${alertCount != 1 ? 's' : ''}'
+                        : 'No Active Alerts',
                     style: GoogleFonts.plusJakartaSans(
                       fontSize: 14,
                       fontWeight: FontWeight.w700,
-                      color: const Color(0xFF1A1A1A),
+                      color: alertCount > 0
+                          ? const Color(0xFFB71C1C)
+                          : AppColors.primary,
                     ),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
                   const SizedBox(height: 3),
                   Text(
-                    'May 24, 2024 • 08:14 AM · Winter Wheat',
+                    alertCount > 0
+                        ? 'Tap to view monitoring details'
+                        : 'All nutrient levels within range',
                     style: GoogleFonts.manrope(
                       fontSize: 11,
                       fontWeight: FontWeight.w500,
@@ -1102,11 +1152,11 @@ class _AlertRow extends StatelessWidget {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
               decoration: BoxDecoration(
-                color: const Color(0xFFFFEBEE),
+                color: alertCount > 0 ? const Color(0xFFFFEBEE) : const Color(0xFFE8F5E9),
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Text(
-                'CRITICAL',
+                alertCount > 0 ? '$alertCount Alert${alertCount != 1 ? 's' : ''}' : 'Normal',
                 style: GoogleFonts.manrope(
                   fontSize: 10,
                   fontWeight: FontWeight.w800,

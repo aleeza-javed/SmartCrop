@@ -1,182 +1,171 @@
 # SmartCrop
 
-Smart farming mobile app.
+Smart farming mobile app with AI-powered crop recommendation and real-time monitoring.
 
 ---
 
-## 📱 What is this?
+## What is this?
 
-An app for farmers to monitor crops, sensors, irrigation, and get AI-powered recommendations.
+SmartCrop is a Flutter mobile application that helps farmers monitor their crops using IoT sensor data and get AI-powered recommendations. It connects to a Python/Flask backend that runs a Random Forest machine learning model for crop recommendation and a rule-based monitoring engine for continuous crop health tracking.
 
----
-
-## 🚀 How to Run This Project (Step by Step)
-
-> **No coding knowledge needed.** Just follow these commands in order.
+The app supports 30 crops: apple, banana, blackgram, chickpea, coconut, coffee, cotton, grapes, jute, kidneybeans, lentil, maize, mango, mothbeans, mungbean, muskmelon, mustard, onion, orange, papaya, pigeonpeas, pomegranate, rice, sorghum, sugarcane, sunflower, tobacco, tomato, watermelon, wheat.
 
 ---
 
-### Step 1: Install Flutter
+## Project Structure
 
-Download and install Flutter from here:
-https://docs.flutter.dev/get-started/install
-
-Choose your operating system (macOS / Windows / Linux) and follow the instructions.
-
-After installation, open **Terminal** (macOS/Linux) or **Command Prompt** (Windows) and run:
-
-```bash
-flutter doctor
+```
+SmartCrop/
+├── lib/
+│   ├── main.dart                          # App entry point
+│   ├── firebase_options.dart              # Firebase configuration
+│   ├── models/
+│   │   └── sensor_data.dart               # SensorData model
+│   ├── services/
+│   │   ├── auth_service.dart              # Firebase authentication
+│   │   ├── sensor_service.dart            # Realtime sensor stream
+│   │   ├── crop_api_service.dart          # Backend API client (/predict, /fertilizer, /monitor)
+│   │   └── active_crop_service.dart       # Persistent active crop storage (SharedPreferences)
+│   ├── screens/
+│   │   ├── dashboard_screen.dart          # Main dashboard (home, sensors, insights, reports, profile tabs)
+│   │   ├── ai_crop_screen.dart            # AI crop recommendation screen
+│   │   ├── fertilizer_screen.dart         # Fertilizer recommendations (backend-connected)
+│   │   ├── sensors_screen.dart            # Sensor monitoring with alerts (backend-connected)
+│   │   ├── sensor_alert_detail_screen.dart # Alert detail view (backend-connected)
+│   │   ├── notifications_screen.dart      # Notifications list (backend-connected)
+│   │   ├── insights_tab.dart              # Insights tab with fertilizer alerts (backend-connected)
+│   │   ├── reports_tab.dart               # Reports tab (currently hardcoded/static)
+│   │   └── ...                            # Other screens
+│   └── theme/
+│       └── app_colors.dart                # Theme colors
+├── Smart Crop Ml Model/                   # Python backend
+│   ├── app.py                             # Flask REST API
+│   ├── Crop_recommendation_extended.csv   # Training dataset (3000 rows, 30 crops)
+│   ├── smartcrop_random_forest.ipynb      # Model training notebook
+│   ├── smartcrop_rf_model.pkl             # Trained Random Forest model
+│   ├── smartcrop_label_encoder.pkl        # Label encoder
+│   ├── test_api.py                        # Live API smoke tests
+│   └── fertillizer Alerts/
+│       ├── crop_thresholds.py             # Crop-specific monitoring thresholds (all 30 crops)
+│       ├── monitoring_engine.py           # Rule-based monitoring engine
+│       ├── simulate_sensor_data.py        # Simulated IoT data (8 scenarios)
+│       └── test_monitoring.py             # Automated tests
+└── pubspec.yaml                           # Flutter dependencies
 ```
 
-Make sure everything has a green checkmark ✅. If something is missing, the doctor will tell you what to install.
-
 ---
 
-### Step 2: Clone the Project
+## How to Run
+
+### Backend (Python/Flask)
 
 ```bash
-git clone https://github.com/aleeza-javed/SmartCrop.git
+cd "Smart Crop Ml Model"
+source venv/bin/activate
+python app.py
+```
+
+The server starts on `http://localhost:5000`.
+
+### Frontend (Flutter)
+
+```bash
 cd SmartCrop
-git checkout mobile-app-frontend
-```
-
----
-
-### Step 3: Install Dependencies
-
-```bash
 flutter pub get
-```
-
-Wait for it to finish. You should see `Got dependencies!` at the end.
-
----
-
-### Step 4: Set Up Java (For Android Only)
-
-The app needs **Java 17** to build for Android.
-
-**Check your Java version:**
-```bash
-java -version
-```
-
-If it's NOT version 17, do one of these:
-
-**macOS (Homebrew):**
-```bash
-brew install openjdk@17
-export JAVA_HOME=/opt/homebrew/opt/openjdk@17
-```
-
-**Windows / Linux:** Download JDK 17 from https://adoptium.net/ and set `JAVA_HOME`.
-
----
-
-### Step 5: Connect Your Phone or Start Emulator
-
-**Option A — Physical Android phone:**
-1. Enable **Developer Options** on your phone (Settings → About Phone → Tap "Build Number" 7 times)
-2. Enable **USB Debugging** (Settings → Developer Options)
-3. Plug your phone into your computer via USB
-4. Run `flutter devices` — your phone should appear
-
-**Option B — Android Emulator:**
-1. Open Android Studio
-2. Click "More Actions" → "Virtual Device Manager"
-3. Create a new device and start it
-
-**Option C — Web browser:**
-No setup needed. Just use `flutter run -d chrome` in Step 6.
-
----
-
-### Step 6: Run the App
-
-```bash
 flutter run
 ```
 
-If you have multiple devices, it will ask you to pick one. Select the number of your device and press Enter.
-
-**To run on web instead:**
-```bash
-flutter run -d chrome
-```
-
-The app will open. You'll see the login screen.
+For web: `flutter run -d chrome`
 
 ---
 
-### Step 7: Fix Google Sign-In (One-Time Setup)
+## API Endpoints
 
-The first time you tap "Continue with Google", it will fail. Fix it by adding your **SHA-1 fingerprint**:
+The Flutter app connects to these backend endpoints:
 
-**Get your SHA-1:**
-```bash
-keytool -list -v -keystore ~/.android/debug.keystore -alias androiddebugkey -storepass android -keypass android | grep "SHA1"
-```
-
-You'll see something like: `SHA1: 8F:9D:D6:26:FA:51:F5:00:65:78:F8:DC:31:20:2E:D2:F4:D0:92:AC`
-
-**Now add it to Firebase:**
-1. Go to https://console.firebase.google.com/project/smart-crop-ddf69/settings/general
-2. Scroll down to **Your apps** → click the Android app
-3. Click **Add Fingerprint**
-4. Paste the SHA-1 you copied
-5. Click **Save**
-
-If you don't have a debug keystore yet (error: `keytool error`), create one first:
-
-```bash
-keytool -genkey -v -keystore ~/.android/debug.keystore -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US" -storepass android -keypass android
-```
-
-Then run the SHA-1 command again.
+| Endpoint | Method | Purpose |
+|---|---|---|
+| `/health` | GET | Liveness check |
+| `/features` | GET | The 7 ML input features |
+| `/predict` | POST | Top-3 recommended crops for given soil/weather conditions |
+| `/predict/batch` | POST | Batch crop recommendation |
+| `/fertilizer` | POST | Per-nutrient (N/P/K) fertilizer advice for a specific crop |
+| `/monitor` | POST | Monitoring analysis with crop-specific thresholds |
+| `/monitor/config` | GET | Available crops and threshold configuration |
 
 ---
 
-### Step 8: Create an Account
+## App Features
 
-1. Open the app
-2. Tap **Sign Up**
-3. Enter your name, email, and password
-4. Accept the terms and tap **Create Account**
-5. Go back to login and sign in
+### Active Crop System
+
+The dashboard has a dedicated Active Crop section where the user selects their current crop. This crop is persisted across app restarts using SharedPreferences and drives all crop-specific logic throughout the app. When the user changes the active crop, all connected screens (Sensors, Insights, Fertilizer, Notifications) immediately update to use the new crop.
+
+### Dashboard Structure
+
+The main Dashboard has five tabs:
+
+1. **Home** - Active Crop selector, AI Crop Recommendation card, Field Overview, and Status Alerts
+2. **Sensors** - Real-time sensor readings with monitoring alerts (connected to /monitor endpoint)
+3. **Insights** - Fertilizer recommendations and crop-specific alerts (connected to /fertilizer and /monitor endpoints)
+4. **Reports** - Analytical insights, growth trends, and report downloads (currently hardcoded/mock data)
+5. **Profile** - User profile and settings
+
+### AI Crop Recommendation
+
+The AI recommendation screen calls the backend `/predict` endpoint with 7 soil and weather parameters (N, P, K, temperature, humidity, pH, rainfall) and returns the top-3 recommended crops. The user can accept any recommended crop to set it as the Active Crop.
+
+### Real-time Monitoring
+
+The Sensors tab receives live sensor data via a Firebase Realtime Database stream. The monitoring engine on the backend analyzes current readings against crop-specific thresholds derived from the training dataset (mean +/- 1 std). It tracks historical readings over a 72-hour window to distinguish transient noise from persistent issues.
+
+### Fertilizer Recommendations
+
+The Insights tab and Fertilizer screen call the backend `/fertilizer` endpoint with the active crop and current N/P/K sensor values. The backend returns specific fertilizer recommendations based on which nutrients are deficient or excessive for the selected crop.
 
 ---
 
-## ❓ Common Problems
+## Supported Crops (30)
+
+All 30 crops from the ML training dataset are supported across the entire stack:
+
+**Fruits:** apple, banana, coconut, grapes, mango, muskmelon, orange, papaya, pomegranate, watermelon
+
+**Grains/Cereals:** barley (via maize), jute, maize, millet (via sorghum), mustard, rice, sorghum, wheat
+
+**Legumes:** blackgram, chickpea, kidneybeans, lentil, mothbeans, mungbean, pigeonpeas
+
+**Other:** coffee, cotton, onion, sugarcane, sunflower, tobacco, tomato
+
+Each crop has monitoring thresholds (N, P, K, temperature, humidity, pH, soil moisture) derived from the project's own training dataset.
+
+---
+
+## Tech Stack
+
+- **Frontend:** Flutter/Dart, Google Fonts, SharedPreferences
+- **Backend:** Python, Flask, scikit-learn (Random Forest), pandas, numpy
+- **Authentication:** Firebase Auth (Google Sign-In + Email/Password)
+- **Database:** Firebase Realtime Database (sensor data stream)
+- **ML Model:** Random Forest Classifier (30 classes, 7 features)
+
+---
+
+## Common Problems
 
 | Problem | Solution |
-|---------|----------|
-| `flutter: command not found` | Flutter is not installed. Go back to Step 1. |
+|---|---|
+| `flutter: command not found` | Install Flutter from https://docs.flutter.dev/get-started/install |
 | `flutter pub get` fails | Run `flutter pub upgrade --major-versions` then `flutter pub get` again |
-| `java: command not found` | Install Java 17 (Step 4) |
-| Gradle build fails with "Unsupported class file major version" | Your Java version is too new. Install Java 17 (Step 4) |
-| "Google sign-in failed" | You skipped Step 7 — add your SHA-1 to Firebase |
-| `error: src refspec` when pushing | You don't have write access to the repo |
+| `java: command not found` | Install Java 17: `brew install openjdk@17` (macOS) |
+| Gradle build fails | Ensure Java 17 is installed and JAVA_HOME is set |
+| "Google sign-in failed" | Add your SHA-1 fingerprint to Firebase (see below) |
 | App crashes on launch | Run `flutter clean && flutter pub get && flutter run` |
+| Backend connection refused | Ensure Flask server is running on localhost:5000 |
 
 ---
 
-## 📁 Project Structure (For Reference)
-
-```
-lib/
-├── main.dart              # App start
-├── firebase_options.dart   # Firebase settings
-├── services/               # Auth logic
-├── screens/                # All app screens
-└── theme/                  # Colors and styling
-```
-
----
-
-## 🔧 For Developers (Advanced)
-
-### Firebase Setup (Only if using a different project)
+## Firebase Setup
 
 ```bash
 dart pub global activate flutterfire_cli
@@ -185,17 +174,20 @@ firebase login
 flutterfire configure --project=smart-crop-ddf69 --platforms=android,web --android-package-name=com.smartcrop.smart_crop --out=lib/firebase_options.dart
 ```
 
-### Branch Info
+### SHA-1 for Android
 
-- Branch: `mobile-app-frontend`
-- Remote: `https://github.com/aleeza-javed/SmartCrop.git`
+```bash
+keytool -list -v -keystore ~/.android/debug.keystore -alias androiddebugkey -storepass android -keypass android | grep "SHA1"
+```
+
+Add the SHA-1 to Firebase Console > Project Settings > Android app > Add Fingerprint.
 
 ---
 
-## ✅ Platforms
+## Platforms
 
-| Platform | Works? |
-|----------|--------|
-| Android  | ✅ Yes |
-| Web      | ✅ Yes |
-| iPhone   | ❌ Not yet |
+| Platform | Status |
+|---|---|
+| Android | Supported |
+| Web | Supported |
+| iOS | Not yet configured |

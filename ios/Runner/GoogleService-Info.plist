@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CLIENT_ID</key>
+	<string>1083437709603-ovvecn8f69o1ildh8p8pqdc09ekche70.apps.googleusercontent.com</string>
+	<key>REVERSED_CLIENT_ID</key>
+	<string>com.googleusercontent.apps.1083437709603-ovvecn8f69o1ildh8p8pqdc09ekche70</string>
+	<key>ANDROID_CLIENT_ID</key>
+	<string>1083437709603-0sain6dre9au4qs0fca4mugc5jfgi7r3.apps.googleusercontent.com</string>
+	<key>API_KEY</key>
+	<string>AIzaSyCaEE3hXbGLj_oesWxvEaDdV84DQUkCayE</string>
+	<key>GCM_SENDER_ID</key>
+	<string>1083437709603</string>
+	<key>PLIST_VERSION</key>
+	<string>1</string>
+	<key>BUNDLE_ID</key>
+	<string>com.smartcrop.smart-crop</string>
+	<key>PROJECT_ID</key>
+	<string>smart-crop-ddf69</string>
+	<key>STORAGE_BUCKET</key>
+	<string>smart-crop-ddf69.firebasestorage.app</string>
+	<key>IS_ADS_ENABLED</key>
+	<false></false>
+	<key>IS_ANALYTICS_ENABLED</key>
+	<false></false>
+	<key>IS_APPINVITE_ENABLED</key>
+	<true></true>
+	<key>IS_GCM_ENABLED</key>
+	<true></true>
+	<key>IS_SIGNIN_ENABLED</key>
+	<true></true>
+	<key>GOOGLE_APP_ID</key>
+	<string>1:1083437709603:ios:a82f94067d109a8992f496</string>
+	<key>DATABASE_URL</key>
+	<string>https://smart-crop-ddf69-default-rtdb.firebaseio.com</string>
+</dict>
+</plist>
