@@ -25,18 +25,18 @@ class ReportsTab extends StatefulWidget {
 class _ReportsTabState extends State<ReportsTab> {
   static const String _baseUrl = 'http://192.168.111.186:5000';
 
+  bool _isExporting = false;
   bool _loading = true;
-  bool _refreshing = false;
-  String? _error;
 
   List<Map<String, dynamic>> _history = [];
-  Map<String, dynamic> _current = {};
+  Map<String, dynamic>? _current;
 
-  Map<String, dynamic> _monitorConfig = {};
-  Map<String, dynamic> _monitorResult = {};
-  Map<String, dynamic> _fertilizerResult = {};
+  int _healthScore = 0;
+  String _overallStatus = 'No data';
+  List<String> _alerts = [];
+  List<String> _recommendations = [];
 
-  List<Map<String, dynamic>> _monthlyHealth = [];
+  Map<String, dynamic> _fertilizer = {};
 
   @override
   void initState() {
@@ -53,354 +53,34 @@ class _ReportsTabState extends State<ReportsTab> {
     }
   }
 
-  Future<void> _loadReport({bool refresh = false}) async {
-    if (refresh) {
-      setState(() {
-        _refreshing = true;
-        _error = null;
-      });
-    } else {
-      setState(() {
-        _loading = true;
-        _error = null;
-      });
+  Future<void> _loadReport() async {
+    if (mounted) {
+      setState(() => _loading = true);
     }
 
     try {
-      final history = await _fetchHistory(widget.crop);
+      await _fetchHistory();
 
-      if (history.isEmpty) {
-        if (mounted) {
-          setState(() {
-            _history = [];
-            _current = {};
-            _monitorConfig = {};
-            _monitorResult = {};
-            _fertilizerResult = {};
-            _monthlyHealth = [];
-            _loading = false;
-            _refreshing = false;
-          });
-        }
-        return;
+      if (_history.isNotEmpty) {
+        _current = _history.last;
+
+        await _fetchMonitoring();
+        await _fetchFertilizer();
+      } else {
+        _current = null;
+        _healthScore = 0;
+        _overallStatus = 'No data';
+        _alerts = [];
+        _recommendations = [];
+        _fertilizer = {};
       }
-
-      final current = history.last;
-
-      final config = await _fetchMonitorConfig();
-
-      Map<String, dynamic> monitor = {};
-      Map<String, dynamic> fertilizer = {};
-
-      try {
-        monitor = await _fetchMonitoring(
-          crop: widget.crop,
-          current: current,
-          history: history,
-        );
-      } catch (_) {
-        monitor = {};
-      }
-
-      try {
-        fertilizer = await _fetchFertilizer(
-          crop: widget.crop,
-          current: current,
-        );
-      } catch (_) {
-        fertilizer = {};
-      }
-
-      final monthly = await _calculateMonthlyHealth(
-        history,
-      );
-
-      if (!mounted) return;
-
-      setState(() {
-        _history = history;
-        _current = current;
-        _monitorConfig = config;
-        _monitorResult = monitor;
-        _fertilizerResult = fertilizer;
-        _monthlyHealth = monthly;
-        _loading = false;
-        _refreshing = false;
-      });
     } catch (e) {
-      if (!mounted) return;
-
-      setState(() {
-        _loading = false;
-        _refreshing = false;
-        _error = e.toString();
-      });
-    }
-  }
-
-  Future<List<Map<String, dynamic>>> _fetchHistory(String crop) async {
-    final ref = FirebaseDatabase.instance
-        .ref('sensor_history')
-        .child(_normalizeCrop(crop));
-
-    final snapshot = await ref.get();
-
-    if (!snapshot.exists || snapshot.value == null) {
-      return [];
-    }
-
-    final value = snapshot.value;
-
-    if (value is! Map) {
-      return [];
-    }
-
-    final readings = <Map<String, dynamic>>[];
-
-    value.forEach((dateKey, dateValue) {
-      if (dateValue is! Map) return;
-
-      dateValue.forEach((readingId, readingValue) {
-        if (readingValue is! Map) return;
-
-        final map = <String, dynamic>{};
-
-        readingValue.forEach((key, value) {
-          map[key.toString()] = value;
-        });
-
-        map['dateKey'] = dateKey.toString();
-        map['readingId'] = readingId.toString();
-
-        final timestamp = map['timestamp'];
-
-        DateTime? recordedAt;
-
-        if (timestamp is String) {
-          recordedAt = DateTime.tryParse(timestamp);
-        }
-
-        recordedAt ??= DateTime.tryParse(dateKey.toString());
-
-        map['recordedAt'] =
-            recordedAt ?? DateTime.fromMillisecondsSinceEpoch(0);
-
-        readings.add(map);
-      });
-    });
-
-    readings.sort(
-      (a, b) => (a['recordedAt'] as DateTime)
-          .compareTo(b['recordedAt'] as DateTime),
-    );
-
-    return readings;
-  }
-
-  Future<Map<String, dynamic>> _fetchMonitorConfig() async {
-    final response = await http.get(
-      Uri.parse('$_baseUrl/monitor/config'),
-    );
-
-    if (response.statusCode != 200) {
-      throw Exception(
-        'Unable to load monitoring configuration.',
-      );
-    }
-
-    final decoded = jsonDecode(response.body);
-
-    if (decoded is Map<String, dynamic>) {
-      return decoded;
-    }
-
-    return {};
-  }
-
-  Future<Map<String, dynamic>> _fetchMonitoring({
-    required String crop,
-    required Map<String, dynamic> current,
-    required List<Map<String, dynamic>> history,
-  }) async {
-    final currentPayload = _monitorPayload(current);
-
-    final historyPayload = history.map(_monitorPayload).toList();
-
-    final response = await http.post(
-      Uri.parse('$_baseUrl/monitor'),
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: jsonEncode({
-        'crop': crop,
-        'current': currentPayload,
-        'history': historyPayload,
-      }),
-    );
-
-    if (response.statusCode != 200) {
-      throw Exception(
-        'Monitoring service returned ${response.statusCode}.',
-      );
-    }
-
-    final decoded = jsonDecode(response.body);
-
-    if (decoded is Map<String, dynamic>) {
-      return decoded;
-    }
-
-    return {};
-  }
-
-  Future<Map<String, dynamic>> _fetchFertilizer({
-    required String crop,
-    required Map<String, dynamic> current,
-  }) async {
-    final response = await http.post(
-      Uri.parse('$_baseUrl/fertilizer'),
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: jsonEncode({
-        'crop': crop,
-        'N': _number(current['N']),
-        'P': _number(current['P']),
-        'K': _number(current['K']),
-      }),
-    );
-
-    if (response.statusCode != 200) {
-      throw Exception(
-        'Fertilizer service returned ${response.statusCode}.',
-      );
-    }
-
-    final decoded = jsonDecode(response.body);
-
-    if (decoded is Map<String, dynamic>) {
-      return decoded;
-    }
-
-    return {};
-  }
-
-  Future<List<Map<String, dynamic>>> _calculateMonthlyHealth(
-    List<Map<String, dynamic>> history,
-  ) async {
-    if (history.isEmpty) return [];
-
-    final grouped = <String, List<Map<String, dynamic>>>{};
-
-    for (final reading in history) {
-      final date = reading['recordedAt'] as DateTime;
-
-      final key =
-          '${date.year}-${date.month.toString().padLeft(2, '0')}';
-
-      grouped.putIfAbsent(key, () => []).add(reading);
-    }
-
-    final result = <Map<String, dynamic>>[];
-
-    for (final entry in grouped.entries) {
-      final readings = entry.value;
-
-      // Use up to 5 representative readings for the month.
-      final selected = _sampleReadings(readings, 5);
-
-      final scores = <double>[];
-
-      for (final reading in selected) {
-        try {
-          final monitor = await _fetchMonitoring(
-            crop: widget.crop,
-            current: reading,
-            history: readings,
-          );
-
-          final score = _number(monitor['health_score']);
-
-          if (score > 0 || monitor.containsKey('health_score')) {
-            scores.add(score);
-          }
-        } catch (_) {
-          // Keep going if one historical reading cannot be evaluated.
-        }
+      debugPrint('Reports load error: $e');
+    } finally {
+      if (mounted) {
+        setState(() => _loading = false);
       }
-
-      if (scores.isEmpty) continue;
-
-      final average =
-          scores.reduce((a, b) => a + b) / scores.length;
-
-      result.add({
-        'month': entry.key,
-        'score': average,
-        'count': readings.length,
-      });
     }
-
-    result.sort(
-      (a, b) =>
-          (a['month'] as String).compareTo(b['month'] as String),
-    );
-
-    return result;
-  }
-
-  List<Map<String, dynamic>> _sampleReadings(
-    List<Map<String, dynamic>> readings,
-    int maximum,
-  ) {
-    if (readings.length <= maximum) {
-      return readings;
-    }
-
-    final result = <Map<String, dynamic>>[];
-
-    for (int i = 0; i < maximum; i++) {
-      final index =
-          ((readings.length - 1) * i / (maximum - 1)).round();
-
-      result.add(readings[index]);
-    }
-
-    return result;
-  }
-
-  Map<String, dynamic> _monitorPayload(
-    Map<String, dynamic> reading,
-  ) {
-    return {
-      'N': _number(reading['N']),
-      'P': _number(reading['P']),
-      'K': _number(reading['K']),
-      'temperature': _number(
-        reading['temperature'] ?? reading['airTemp'],
-      ),
-      'humidity': _number(
-        reading['humidity'] ?? reading['airHumidity'],
-      ),
-      'ph': _number(
-        reading['ph'] ?? reading['pH'],
-      ),
-      'soil_moisture': _number(
-        reading['soil_moisture'] ??
-            reading['soilMoisturePercent'] ??
-            reading['soil_moisture_percent'],
-      ),
-    };
-  }
-
-  double _number(dynamic value) {
-    if (value is num) return value.toDouble();
-
-    if (value is String) {
-      return double.tryParse(value) ?? 0;
-    }
-
-    return 0;
   }
 
   String _normalizeCrop(String crop) {
@@ -412,901 +92,823 @@ class _ReportsTabState extends State<ReportsTab> {
     return cleaned.isEmpty ? 'unknown' : cleaned;
   }
 
-  double get _healthScore {
-    return _number(_monitorResult['health_score']);
-  }
+  Future<void> _fetchHistory() async {
+    final cropKey = _normalizeCrop(widget.crop);
 
-  List<dynamic> get _alerts {
-    final value = _monitorResult['alerts'];
+    final snapshot = await FirebaseDatabase.instance
+        .ref('sensor_history/$cropKey')
+        .get();
 
-    if (value is List) return value;
+    final value = snapshot.value;
 
-    return [];
-  }
-
-  List<dynamic> get _recommendations {
-    final value = _monitorResult['recommendations'];
-
-    if (value is List) return value;
-
-    return [];
-  }
-
-  Map<String, dynamic> get _fertilizerRecommendations {
-    final value = _fertilizerResult['recommendations'];
-
-    if (value is Map) {
-      return Map<String, dynamic>.from(value);
+    if (value is! Map) {
+      _history = [];
+      return;
     }
 
-    return {};
+    final readings = <Map<String, dynamic>>[];
+
+    value.forEach((dateKey, dateValue) {
+      if (dateValue is! Map) return;
+
+      dateValue.forEach((readingId, readingValue) {
+        if (readingValue is! Map) return;
+
+        final raw = Map<String, dynamic>.from(
+          (readingValue as Map).map(
+            (key, value) => MapEntry(key.toString(), value),
+          ),
+        );
+
+        raw['timestamp'] ??= '$dateKey';
+        raw['_id'] = readingId.toString();
+
+        readings.add(raw);
+      });
+    });
+
+    readings.sort((a, b) {
+      final aTime = DateTime.tryParse('${a['timestamp']}');
+      final bTime = DateTime.tryParse('${b['timestamp']}');
+
+      if (aTime == null && bTime == null) return 0;
+      if (aTime == null) return -1;
+      if (bTime == null) return 1;
+
+      return aTime.compareTo(bTime);
+    });
+
+    _history = readings;
   }
 
-  double _value(String key) {
-    return _number(
-      _current[key] ??
-          _current[_alternativeKey(key)],
-    );
+  double _number(dynamic value) {
+    if (value is num) return value.toDouble();
+
+    return double.tryParse('$value') ?? 0;
   }
 
-  String _alternativeKey(String key) {
-    switch (key) {
-      case 'N':
-        return 'nitrogen';
-      case 'P':
-        return 'phosphorus';
-      case 'K':
-        return 'potassium';
-      case 'temperature':
-        return 'airTemp';
-      case 'humidity':
-        return 'airHumidity';
-      case 'ph':
-        return 'pH';
-      case 'soil_moisture':
-        return 'soilMoisturePercent';
-      default:
-        return key;
-    }
+  Map<String, double> _monitorPayload(Map<String, dynamic> data) {
+    return {
+      'N': _number(data['n'] ?? data['N']),
+      'P': _number(data['p'] ?? data['P']),
+      'K': _number(data['k'] ?? data['K']),
+      'temperature': _number(
+        data['airTemp'] ?? data['temperature'],
+      ),
+      'humidity': _number(
+        data['airHumidity'] ?? data['humidity'],
+      ),
+      'ph': _number(
+        data['pH'] ?? data['ph'],
+      ),
+      'soil_moisture': _number(
+        data['soilMoisturePercent'] ??
+            data['soil_moisture'] ??
+            data['soilMoisture'],
+      ),
+    };
   }
 
-  String _statusFor(String nutrient) {
-    final recommendation =
-        _fertilizerRecommendations[nutrient];
+  Future<void> _fetchMonitoring() async {
+    if (_current == null) return;
 
-    if (recommendation is Map) {
-      return recommendation['status']?.toString() ?? 'unknown';
-    }
+    final current = _monitorPayload(_current!);
 
-    return 'unknown';
-  }
+    final history = _history
+        .map(_monitorPayload)
+        .toList();
 
-  List<double> _optimalRangeFor(String nutrient) {
-    final recommendation =
-        _fertilizerRecommendations[nutrient];
+    try {
+      final response = await http.post(
+        Uri.parse('$_baseUrl/monitor'),
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: jsonEncode({
+          'crop': widget.crop,
+          'current': current,
+          'history': history,
+        }),
+      );
 
-    if (recommendation is Map) {
-      final value = recommendation['optimal_range'];
-
-      if (value is List) {
-        return value
-            .map((e) => _number(e))
-            .toList();
-      }
-    }
-
-    return [];
-  }
-
-  String _adviceFor(String nutrient) {
-    final recommendation =
-        _fertilizerRecommendations[nutrient];
-
-    if (recommendation is Map) {
-      return recommendation['advice']?.toString() ?? '';
-    }
-
-    return '';
-  }
-
-  String _monthName(String key) {
-    final parts = key.split('-');
-
-    if (parts.length != 2) return key;
-
-    final month = int.tryParse(parts[1]);
-
-    const names = [
-      '',
-      'January',
-      'February',
-      'March',
-      'April',
-      'May',
-      'June',
-      'July',
-      'August',
-      'September',
-      'October',
-      'November',
-      'December',
-    ];
-
-    if (month == null || month < 1 || month > 12) {
-      return key;
-    }
-
-    return '${names[month]} ${parts[0]}';
-  }
-
-  String _prettyStatus(String status) {
-    if (status.isEmpty) return 'Unknown';
-
-    return status
-        .replaceAll('_', ' ')
-        .split(' ')
-        .map(
-          (word) => word.isEmpty
-              ? ''
-              : '${word[0].toUpperCase()}${word.substring(1).toLowerCase()}',
-        )
-        .join(' ');
-  }
-
-  Color _statusColor(String status) {
-    switch (status.toLowerCase()) {
-      case 'sufficient':
-      case 'normal':
-      case 'healthy':
-        return Colors.green;
-      case 'warning':
-        return Colors.orange;
-      case 'deficient':
-      case 'critical':
-      case 'excess':
-        return Colors.red;
-      default:
-        return Colors.grey;
-    }
-  }
-
-  Future<void> _exportSummary() async {
-    if (_current.isEmpty) return;
-
-    final buffer = StringBuffer();
-
-    buffer.writeln('SMARTCROP REPORT');
-    buffer.writeln('================');
-    buffer.writeln();
-    buffer.writeln('Crop: ${widget.crop}');
-    buffer.writeln('Generated: ${DateTime.now()}');
-    buffer.writeln();
-
-    buffer.writeln('CURRENT SENSOR VALUES');
-    buffer.writeln('---------------------');
-    buffer.writeln('Nitrogen (N): ${_value('N')}');
-    buffer.writeln('Phosphorus (P): ${_value('P')}');
-    buffer.writeln('Potassium (K): ${_value('K')}');
-    buffer.writeln('Temperature: ${_value('temperature')} °C');
-    buffer.writeln('Humidity: ${_value('humidity')} %');
-    buffer.writeln('pH: ${_value('ph')}');
-    buffer.writeln(
-      'Soil Moisture: ${_value('soil_moisture')} %',
-    );
-    buffer.writeln();
-
-    buffer.writeln('MONITORING');
-    buffer.writeln('----------');
-    buffer.writeln(
-      'Health Score: ${_healthScore.toStringAsFixed(1)}/100',
-    );
-    buffer.writeln(
-      'Overall Status: ${_prettyStatus(
-        _monitorResult['overall_status']?.toString() ?? '',
-      )}',
-    );
-    buffer.writeln();
-
-    if (_alerts.isNotEmpty) {
-      buffer.writeln('ACTIVE ALERTS');
-      buffer.writeln('-------------');
-
-      for (final alert in _alerts) {
-        if (alert is Map) {
-          buffer.writeln(
-            '- ${alert['severity']}: ${alert['message']}',
-          );
-        }
+      if (response.statusCode != 200) {
+        debugPrint(
+          'Monitor API error: ${response.statusCode} ${response.body}',
+        );
+        return;
       }
 
-      buffer.writeln();
-    }
+      final decoded = jsonDecode(response.body);
 
-    if (_recommendations.isNotEmpty) {
-      buffer.writeln('RECOMMENDATIONS');
-      buffer.writeln('---------------');
+      if (decoded is! Map) return;
 
-      for (final recommendation in _recommendations) {
-        buffer.writeln('- $recommendation');
+      final data = Map<String, dynamic>.from(decoded);
+
+      _overallStatus =
+          '${data['overall_status'] ?? data['status'] ?? 'No data'}';
+
+      _healthScore =
+          (data['health_score'] as num?)?.toInt() ??
+              (data['healthScore'] as num?)?.toInt() ??
+              0;
+
+      final rawAlerts = data['alerts'];
+
+      if (rawAlerts is List) {
+        _alerts = rawAlerts.map((alert) {
+          if (alert is Map) {
+            return '${alert['message'] ?? alert['parameter'] ?? 'Alert'}';
+          }
+
+          return '$alert';
+        }).toList();
       }
 
-      buffer.writeln();
-    }
+      final rawPersistent = data['persistent_issues'];
 
-    if (_fertilizerRecommendations.isNotEmpty) {
-      buffer.writeln('FERTILIZER STATUS');
-      buffer.writeln('-----------------');
+      if (rawPersistent is List) {
+        for (final issue in rawPersistent) {
+          final text = '$issue';
 
-      for (final entry in _fertilizerRecommendations.entries) {
-        if (entry.value is Map) {
-          final data =
-              Map<String, dynamic>.from(entry.value as Map);
-
-          buffer.writeln(
-            '${entry.key}: ${data['status']}',
-          );
-
-          if (data['advice'] != null) {
-            buffer.writeln(
-              'Advice: ${data['advice']}',
-            );
+          if (!_alerts.contains(text)) {
+            _alerts.add(text);
           }
         }
       }
+
+      final rawRecommendations = data['recommendations'];
+
+      if (rawRecommendations is List) {
+        _recommendations =
+            rawRecommendations.map((item) => '$item').toList();
+      }
+    } catch (e) {
+      debugPrint('Monitoring request failed: $e');
+    }
+  }
+
+  Future<void> _fetchFertilizer() async {
+    if (_current == null) return;
+
+    final current = _monitorPayload(_current!);
+
+    try {
+      final response = await http.post(
+        Uri.parse('$_baseUrl/fertilizer'),
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: jsonEncode({
+          'crop': widget.crop,
+          'N': current['N'],
+          'P': current['P'],
+          'K': current['K'],
+        }),
+      );
+
+      if (response.statusCode != 200) {
+        debugPrint(
+          'Fertilizer API error: ${response.statusCode} ${response.body}',
+        );
+        return;
+      }
+
+      final decoded = jsonDecode(response.body);
+
+      if (decoded is Map) {
+        final result = decoded['recommendations'];
+
+        if (result is Map) {
+          _fertilizer = Map<String, dynamic>.from(
+            result.map(
+              (key, value) => MapEntry(key.toString(), value),
+            ),
+          );
+        } else {
+          _fertilizer = Map<String, dynamic>.from(
+            decoded.map(
+              (key, value) => MapEntry(key.toString(), value),
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      debugPrint('Fertilizer request failed: $e');
+    }
+  }
+
+  String _healthText() {
+    if (_current == null) {
+      return 'No sensor history available yet.';
     }
 
-    final directory = await getTemporaryDirectory();
+    final score = _healthScore.clamp(0, 100);
 
-    final file = File(
-      '${directory.path}/smartcrop_${_normalizeCrop(widget.crop)}_report.txt',
-    );
+    if (score >= 80) {
+      return 'Monitoring indicates healthy conditions for ${widget.crop}.';
+    }
 
-    await file.writeAsString(buffer.toString());
+    if (score >= 60) {
+      return 'Some soil or environmental conditions require attention.';
+    }
 
-    await Share.shareXFiles(
-      [XFile(file.path)],
-      text: 'SmartCrop ${widget.crop} report',
-    );
+    return 'Several monitored conditions require attention.';
+  }
+
+  double _healthProgress() {
+    if (_healthScore <= 0) return 0;
+    return (_healthScore.clamp(0, 100)) / 100;
+  }
+
+  String _statusText(dynamic value) {
+    if (value is Map) {
+      return '${value['status'] ?? 'Unknown'}';
+    }
+
+    return '$value';
+  }
+
+  String _fertilizerSummary() {
+    if (_fertilizer.isEmpty) {
+      return 'Fertilizer recommendations will appear when sensor data is available.';
+    }
+
+    final parts = <String>[];
+
+    for (final entry in _fertilizer.entries) {
+      if (entry.value is Map) {
+        final data = Map<String, dynamic>.from(
+          (entry.value as Map).map(
+            (key, value) => MapEntry(key.toString(), value),
+          ),
+        );
+
+        final status = data['status'];
+
+        if (status != null) {
+          parts.add('${entry.key.toUpperCase()}: $status');
+        }
+      }
+    }
+
+    if (parts.isEmpty) {
+      return 'Fertilizer analysis available for ${widget.crop}.';
+    }
+
+    return parts.join('  •  ');
+  }
+
+  List<double> _growthValues() {
+    if (_history.isEmpty) {
+      return [0.45, 0.55, 0.35, 0.65, 0.8, 0.4, 0.5];
+    }
+
+    final recent = _history.length > 7
+        ? _history.sublist(_history.length - 7)
+        : _history;
+
+    final values = recent.map((reading) {
+      final moisture = _number(
+        reading['soilMoisturePercent'] ??
+            reading['soil_moisture'] ??
+            reading['soilMoisture'],
+      );
+
+      if (moisture <= 0) return 0.1;
+
+      return (moisture / 100).clamp(0.1, 1.0);
+    }).toList();
+
+    while (values.length < 7) {
+      values.insert(0, 0.1);
+    }
+
+    return values.take(7).toList();
+  }
+
+  Future<void> _downloadReport(String reportName) async {
+    try {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Downloading $reportName...'),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+
+      await Future.delayed(const Duration(milliseconds: 500));
+
+      final dir = await getApplicationDocumentsDirectory();
+      final filePath = '${dir.path}/$reportName.pdf';
+      final file = File(filePath);
+
+      await file.writeAsString(
+        _reportText(reportName),
+      );
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('$reportName downloaded successfully'),
+            duration: const Duration(seconds: 2),
+            action: SnackBarAction(
+              label: 'Share',
+              onPressed: () => _shareFile(filePath, reportName),
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to download: $e')),
+        );
+      }
+    }
+  }
+
+  String _reportText(String reportName) {
+    final current = _current;
+
+    return '''
+SMARTCROP REPORT
+
+$reportName
+
+Crop: ${widget.crop}
+Generated: ${DateTime.now()}
+
+Monitoring Status: $_overallStatus
+Health Score: $_healthScore/100
+
+Current Sensor Data:
+N: ${current?['n'] ?? current?['N'] ?? 'N/A'}
+P: ${current?['p'] ?? current?['P'] ?? 'N/A'}
+K: ${current?['k'] ?? current?['K'] ?? 'N/A'}
+Temperature: ${current?['airTemp'] ?? current?['temperature'] ?? 'N/A'}
+Humidity: ${current?['airHumidity'] ?? current?['humidity'] ?? 'N/A'}
+pH: ${current?['pH'] ?? current?['ph'] ?? 'N/A'}
+Soil Moisture: ${current?['soilMoisturePercent'] ?? current?['soil_moisture'] ?? 'N/A'}
+
+Alerts:
+${_alerts.isEmpty ? 'No active alerts.' : _alerts.join('\n')}
+
+Recommendations:
+${_recommendations.isEmpty ? 'No recommendations available.' : _recommendations.join('\n')}
+''';
+  }
+
+  Future<void> _shareFile(String filePath, String reportName) async {
+    try {
+      await SharePlus.instance.share(
+        ShareParams(
+          files: [XFile(filePath)],
+          subject: 'SmartCrop Report: $reportName',
+        ),
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to share: $e')),
+        );
+      }
+    }
+  }
+
+  Future<void> _exportAllReports() async {
+    setState(() => _isExporting = true);
+
+    try {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Exporting all reports...'),
+          duration: Duration(seconds: 2),
+        ),
+      );
+
+      await Future.delayed(const Duration(milliseconds: 800));
+
+      final dir = await getApplicationDocumentsDirectory();
+
+      final timestamp = DateTime.now()
+          .toString()
+          .split('.')[0]
+          .replaceAll(':', '-');
+
+      final fileName = 'SmartCrop_Reports_$timestamp.zip';
+      final filePath = '${dir.path}/$fileName';
+      final file = File(filePath);
+
+      await file.writeAsString(
+        '''
+SMARTCROP EXPORT PACKAGE
+
+Crop: ${widget.crop}
+
+Health Score: $_healthScore/100
+Monitoring Status: $_overallStatus
+
+Reports:
+- Field Health Report
+- Irrigation Efficiency Report
+- Soil Composition Analysis
+
+Exported: ${DateTime.now()}
+''',
+      );
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('All reports exported as $fileName'),
+            duration: const Duration(seconds: 2),
+            action: SnackBarAction(
+              label: 'Share',
+              onPressed: () =>
+                  _shareFile(filePath, 'SmartCrop_Reports'),
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to export: $e')),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isExporting = false);
+      }
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    if (_loading) {
-      return const Center(
-        child: CircularProgressIndicator(),
-      );
-    }
+    final current = _current;
 
-    if (_error != null) {
-      return _buildErrorState();
-    }
+    final soilMoisture = current == null
+        ? 0.0
+        : _number(
+            current['soilMoisturePercent'] ??
+                current['soil_moisture'] ??
+                current['soilMoisture'],
+          );
 
-    if (_history.isEmpty) {
-      return _buildEmptyState();
-    }
+    final waterProgress =
+        soilMoisture > 0 ? (soilMoisture / 100).clamp(0.0, 1.0) : 0.72;
 
-    return RefreshIndicator(
-      onRefresh: () => _loadReport(refresh: true),
-      child: CustomScrollView(
-        physics: const AlwaysScrollableScrollPhysics(),
-        slivers: [
-          SliverToBoxAdapter(
-            child: _buildHeader(),
-          ),
-
-          SliverToBoxAdapter(
-            child: _buildCurrentOverview(),
-          ),
-
-          SliverToBoxAdapter(
-            child: _buildSoilNutrients(),
-          ),
-
-          SliverToBoxAdapter(
-            child: _buildEnvironmentalSummary(),
-          ),
-
-          SliverToBoxAdapter(
-            child: _buildHealthScore(),
-          ),
-
-          SliverToBoxAdapter(
-            child: _buildMonthlyHealth(),
-          ),
-
-          SliverToBoxAdapter(
-            child: _buildAlerts(),
-          ),
-
-          SliverToBoxAdapter(
-            child: _buildFertilizerRecommendations(),
-          ),
-
-          SliverToBoxAdapter(
-            child: _buildWaterUsage(),
-          ),
-
-          SliverToBoxAdapter(
-            child: _buildBackendRecommendations(),
-          ),
-
-          const SliverToBoxAdapter(
-            child: SizedBox(height: 30),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildHeader() {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 20, 20, 12),
-      child: Row(
+    return SingleChildScrollView(
+      padding: const EdgeInsets.only(bottom: 32),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Expanded(
+          const SizedBox(height: 24),
+
+          // ── Header ──
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
                   'Analytical Insights',
-                  style: GoogleFonts.poppins(
-                    fontSize: 23,
+                  style: GoogleFonts.plusJakartaSans(
+                    fontSize: 32,
                     fontWeight: FontWeight.w700,
-                    color: AppColors.primary,
+                    color: AppColors.onBackground,
+                    letterSpacing: -0.6,
                   ),
                 ),
-                const SizedBox(height: 5),
+                const SizedBox(height: 4),
                 Text(
-                  'Real-time report for ${_prettyCrop(widget.crop)}',
-                  style: GoogleFonts.poppins(
-                    fontSize: 13,
-                    color: Colors.grey.shade600,
+                  'Comprehensive field reporting for Central Valley Sector 4.',
+                  style: GoogleFonts.plusJakartaSans(
+                    fontSize: 14,
+                    color: AppColors.onSurfaceVariant,
                   ),
                 ),
               ],
             ),
           ),
-          IconButton(
-            onPressed:
-                _refreshing ? null : () => _loadReport(refresh: true),
-            icon: _refreshing
-                ? const SizedBox(
-                    width: 20,
-                    height: 20,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                    ),
-                  )
-                : const Icon(Icons.refresh),
-          ),
-          IconButton(
-            onPressed: _exportSummary,
-            icon: const Icon(Icons.file_download_outlined),
-          ),
-        ],
-      ),
-    );
-  }
 
-  Widget _buildCurrentOverview() {
-    return _sectionCard(
-      title: 'Current Field Overview',
-      icon: Icons.eco_outlined,
-      child: Row(
-        children: [
-          Expanded(
-            child: _metric(
-              'Temperature',
-              '${_value('temperature').toStringAsFixed(1)} °C',
-              Icons.thermostat_outlined,
-            ),
-          ),
-          Expanded(
-            child: _metric(
-              'Humidity',
-              '${_value('humidity').toStringAsFixed(1)} %',
-              Icons.water_drop_outlined,
-            ),
-          ),
-          Expanded(
-            child: _metric(
-              'Soil Moisture',
-              '${_value('soil_moisture').toStringAsFixed(1)} %',
-              Icons.grass_outlined,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+          const SizedBox(height: 20),
 
-  Widget _buildSoilNutrients() {
-    return _sectionCard(
-      title: 'Soil Nutrients Health',
-      icon: Icons.science_outlined,
-      child: Column(
-        children: [
-          _nutrientRow('Nitrogen (N)', 'N'),
-          const Divider(height: 20),
-          _nutrientRow('Phosphorus (P)', 'P'),
-          const Divider(height: 20),
-          _nutrientRow('Potassium (K)', 'K'),
-        ],
-      ),
-    );
-  }
-
-  Widget _nutrientRow(
-    String label,
-    String nutrient,
-  ) {
-    final value = _value(nutrient);
-    final status = _statusFor(nutrient);
-    final range = _optimalRangeFor(nutrient);
-
-    String rangeText = 'No range available';
-
-    if (range.length >= 2) {
-      rangeText =
-          '${range[0].toStringAsFixed(1)} – ${range[1].toStringAsFixed(1)}';
-    }
-
-    return Row(
-      children: [
-        Container(
-          width: 42,
-          height: 42,
-          decoration: BoxDecoration(
-            color: _statusColor(status).withOpacity(.10),
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: Icon(
-            Icons.science_outlined,
-            color: _statusColor(status),
-          ),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                label,
-                style: GoogleFonts.poppins(
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              const SizedBox(height: 3),
-              Text(
-                'Current: ${value.toStringAsFixed(1)}  •  Optimal: $rangeText',
-                style: GoogleFonts.poppins(
-                  fontSize: 11,
-                  color: Colors.grey.shade600,
-                ),
-              ),
-            ],
-          ),
-        ),
-        _statusBadge(status),
-      ],
-    );
-  }
-
-  Widget _buildEnvironmentalSummary() {
-    final status =
-        _monitorResult['overall_status']?.toString() ?? '';
-
-    return _sectionCard(
-      title: 'Environmental Summary',
-      icon: Icons.public_outlined,
-      child: Column(
-        children: [
-          _environmentRow(
-            'Temperature',
-            '${_value('temperature').toStringAsFixed(1)} °C',
-            Icons.thermostat_outlined,
-          ),
-          _environmentRow(
-            'Humidity',
-            '${_value('humidity').toStringAsFixed(1)} %',
-            Icons.water_drop_outlined,
-          ),
-          _environmentRow(
-            'Soil pH',
-            _value('ph').toStringAsFixed(2),
-            Icons.science_outlined,
-          ),
-          _environmentRow(
-            'Soil Moisture',
-            '${_value('soil_moisture').toStringAsFixed(1)} %',
-            Icons.grass_outlined,
-          ),
-          if (status.isNotEmpty) ...[
-            const SizedBox(height: 10),
-            Align(
-              alignment: Alignment.centerLeft,
-              child: _statusBadge(status),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-
-  Widget _environmentRow(
-    String label,
-    String value,
-    IconData icon,
-  ) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 7),
-      child: Row(
-        children: [
-          Icon(
-            icon,
-            size: 21,
-            color: AppColors.primary,
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              label,
-              style: GoogleFonts.poppins(
-                fontSize: 13,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-          ),
-          Text(
-            value,
-            style: GoogleFonts.poppins(
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildHealthScore() {
-    final score = _healthScore.clamp(0, 100);
-
-    final status =
-        _monitorResult['overall_status']?.toString() ?? '';
-
-    return _sectionCard(
-      title: 'Soil Health Index',
-      icon: Icons.monitor_heart_outlined,
-      child: Row(
-        children: [
-          SizedBox(
-            width: 100,
-            height: 100,
-            child: Stack(
-              alignment: Alignment.center,
+          // ── Filter Buttons ──
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Row(
               children: [
-                CircularProgressIndicator(
-                  value: score / 100,
-                  strokeWidth: 9,
-                  backgroundColor: Colors.grey.shade200,
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 10,
+                  ),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFB9F474),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(
+                        Icons.calendar_today,
+                        size: 16,
+                        color: AppColors.onBackground,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        'Last 30 Days',
+                        style: GoogleFonts.manrope(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.onBackground,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-                Text(
-                  '${score.toStringAsFixed(0)}',
-                  style: GoogleFonts.poppins(
-                    fontSize: 24,
-                    fontWeight: FontWeight.w700,
+                const Spacer(),
+                GestureDetector(
+                  onTap: _isExporting ? null : _exportAllReports,
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 10,
+                    ),
+                    decoration: BoxDecoration(
+                      color: AppColors.primary,
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Row(
+                      children: [
+                        _isExporting
+                            ? SizedBox(
+                                width: 16,
+                                height: 16,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  valueColor:
+                                      AlwaysStoppedAnimation<Color>(
+                                    Colors.white.withValues(alpha: 0.8),
+                                  ),
+                                ),
+                              )
+                            : const Icon(
+                                Icons.share,
+                                size: 16,
+                                color: Colors.white,
+                              ),
+                        const SizedBox(width: 8),
+                        Text(
+                          _isExporting ? 'Exporting...' : 'Export All',
+                          style: GoogleFonts.manrope(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ],
             ),
           ),
-          const SizedBox(width: 18),
-          Expanded(
+
+          const SizedBox(height: 24),
+
+          // ── Summary Cards Grid ──
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Column(
+              children: [
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      flex: 2,
+                      child: _YieldCard(
+                        hasData: _history.isNotEmpty,
+                      ),
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      flex: 1,
+                      child: _WaterUsageCard(
+                        progress: waterProgress,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                _SoilHealthCard(
+                  score: _healthScore,
+                  description: _healthText(),
+                ),
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 24),
+
+          // ── AI Insight Card ──
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: _AiInsightCard(
+              recommendation: _recommendations.isNotEmpty
+                  ? _recommendations.first
+                  : _fertilizerSummary(),
+            ),
+          ),
+
+          const SizedBox(height: 28),
+
+          // ── Growth Trends Section ──
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      'Growth Trends',
+                      style: GoogleFonts.plusJakartaSans(
+                        fontSize: 20,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.onBackground,
+                      ),
+                    ),
+                    Container(
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFF2F4EF),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(
+                        children: [
+                          _TrendButton('Daily', true),
+                          _TrendButton('Weekly', false),
+                          _TrendButton('Monthly', false),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                _GrowthChart(
+                  values: _growthValues(),
+                ),
+              ],
+            ),
+          ),
+
+          const SizedBox(height: 28),
+
+          // ── Recent Reports ──
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Monitoring Health Score',
-                  style: GoogleFonts.poppins(
-                    fontWeight: FontWeight.w700,
+                  'Recent Reports',
+                  style: GoogleFonts.plusJakartaSans(
+                    fontSize: 20,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.onBackground,
                   ),
                 ),
-                const SizedBox(height: 5),
-                Text(
-                  status.isEmpty
-                      ? 'No overall status available.'
-                      : 'Overall status: ${_prettyStatus(status)}',
-                  style: GoogleFonts.poppins(
-                    fontSize: 12,
-                    color: Colors.grey.shade600,
-                  ),
+                const SizedBox(height: 12),
+
+                _ReportItem(
+                  icon: Icons.description_rounded,
+                  title: 'May Field Health',
+                  subtitle: _history.isEmpty
+                      ? 'No sensor history yet'
+                      : 'Generated from sensor data',
+                  iconColor: AppColors.primary,
+                  onDownload: () =>
+                      _downloadReport('May Field Health'),
                 ),
-                const SizedBox(height: 7),
-                Text(
-                  'Prototype decision-support metric generated by the SmartCrop monitoring backend.',
-                  style: GoogleFonts.poppins(
-                    fontSize: 10,
-                    color: Colors.grey.shade500,
+
+                const SizedBox(height: 10),
+
+                _ReportItem(
+                  icon: Icons.water_drop_rounded,
+                  title: 'Irrigation Efficiency',
+                  subtitle: _history.isEmpty
+                      ? 'Waiting for sensor data'
+                      : 'Based on soil moisture',
+                  iconColor: const Color(0xFF00796B),
+                  onDownload: () =>
+                      _downloadReport('Irrigation Efficiency'),
+                ),
+
+                const SizedBox(height: 10),
+
+                _ReportItem(
+                  icon: Icons.science_rounded,
+                  title: 'Soil Composition Anal...',
+                  subtitle: _history.isEmpty
+                      ? 'Waiting for sensor data'
+                      : 'NPK monitoring available',
+                  iconColor: const Color(0xFF6A1B9A),
+                  onDownload: () =>
+                      _downloadReport('Soil Composition Analysis'),
+                ),
+
+                const SizedBox(height: 16),
+
+                SizedBox(
+                  width: double.infinity,
+                  child: OutlinedButton(
+                    onPressed: () {},
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      side: const BorderSide(
+                        color: Color(0xFFBFCABA),
+                        style: BorderStyle.solid,
+                        width: 1.5,
+                      ),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    child: Text(
+                      'View Archive',
+                      style: GoogleFonts.manrope(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.primary,
+                      ),
+                    ),
                   ),
                 ),
               ],
             ),
           ),
-        ],
-      ),
-    );
-  }
 
-  Widget _buildMonthlyHealth() {
-    if (_monthlyHealth.isEmpty) {
-      return _sectionCard(
-        title: 'Crop Monthly Health',
-        icon: Icons.show_chart,
-        child: _emptyInline(
-          'Monthly health data will appear after enough historical readings are available.',
-        ),
-      );
-    }
+          const SizedBox(height: 28),
 
-    return _sectionCard(
-      title: 'Crop Monthly Health',
-      icon: Icons.show_chart,
-      child: Column(
-        children: [
-          ..._monthlyHealth.map(
-            (month) {
-              final score = _number(month['score']);
-
-              return Padding(
-                padding: const EdgeInsets.symmetric(vertical: 7),
-                child: Row(
+          // ── Field Image ──
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(20),
+              child: Container(
+                width: double.infinity,
+                height: 240,
+                decoration: BoxDecoration(
+                  color: Colors.grey[300],
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Stack(
+                  fit: StackFit.expand,
                   children: [
-                    SizedBox(
-                      width: 95,
-                      child: Text(
-                        _monthName(
-                          month['month'].toString(),
-                        ),
-                        style: GoogleFonts.poppins(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                    Expanded(
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(10),
-                        child: LinearProgressIndicator(
-                          value: (score / 100).clamp(0, 1),
-                          minHeight: 9,
-                          backgroundColor: Colors.grey.shade200,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 10),
-                    SizedBox(
-                      width: 45,
-                      child: Text(
-                        score.toStringAsFixed(0),
-                        textAlign: TextAlign.right,
-                        style: GoogleFonts.poppins(
-                          fontSize: 12,
-                          fontWeight: FontWeight.w700,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              );
-            },
-          ),
-          if (_monthlyHealth.length >= 2) ...[
-            const Divider(height: 22),
-            _buildMonthlyComparison(),
-          ],
-        ],
-      ),
-    );
-  }
-
-  Widget _buildMonthlyComparison() {
-    final previous =
-        _number(_monthlyHealth[_monthlyHealth.length - 2]['score']);
-
-    final current =
-        _number(_monthlyHealth[_monthlyHealth.length - 1]['score']);
-
-    final difference = current - previous;
-
-    return Row(
-      children: [
-        Icon(
-          difference >= 0
-              ? Icons.trending_up
-              : Icons.trending_down,
-          size: 20,
-        ),
-        const SizedBox(width: 8),
-        Expanded(
-          child: Text(
-            '${difference >= 0 ? '+' : ''}${difference.toStringAsFixed(1)} points compared with the previous available month.',
-            style: GoogleFonts.poppins(
-              fontSize: 11,
-              color: Colors.grey.shade700,
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildAlerts() {
-    if (_alerts.isEmpty) {
-      return _sectionCard(
-        title: 'Active Alerts',
-        icon: Icons.notifications_none,
-        child: Row(
-          children: [
-            Icon(
-              Icons.check_circle_outline,
-              color: Colors.green,
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                'No active monitoring alerts for the current crop.',
-                style: GoogleFonts.poppins(
-                  fontSize: 12,
-                ),
-              ),
-            ),
-          ],
-        ),
-      );
-    }
-
-    return _sectionCard(
-      title: 'Active Alerts',
-      icon: Icons.notifications_active_outlined,
-      child: Column(
-        children: _alerts.map(
-          (alert) {
-            if (alert is! Map) {
-              return const SizedBox.shrink();
-            }
-
-            final severity =
-                alert['severity']?.toString() ?? 'warning';
-
-            final message =
-                alert['message']?.toString() ??
-                    'Monitoring alert detected.';
-
-            return Container(
-              margin: const EdgeInsets.only(bottom: 10),
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                color:
-                    _statusColor(severity).withOpacity(.08),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Icon(
-                    Icons.warning_amber_rounded,
-                    color: _statusColor(severity),
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      message,
-                      style: GoogleFonts.poppins(
-                        fontSize: 12,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            );
-          },
-        ).toList(),
-      ),
-    );
-  }
-
-  Widget _buildFertilizerRecommendations() {
-    if (_fertilizerRecommendations.isEmpty) {
-      return _sectionCard(
-        title: 'Fertilizer Recommendations',
-        icon: Icons.local_florist_outlined,
-        child: _emptyInline(
-          'Fertilizer recommendations are unavailable for this crop.',
-        ),
-      );
-    }
-
-    return _sectionCard(
-      title: 'Fertilizer Recommendations',
-      icon: Icons.local_florist_outlined,
-      child: Column(
-        children: _fertilizerRecommendations.entries.map(
-          (entry) {
-            final nutrient = entry.key;
-
-            final data = entry.value is Map
-                ? Map<String, dynamic>.from(
-                    entry.value as Map,
-                  )
-                : <String, dynamic>{};
-
-            final status =
-                data['status']?.toString() ?? 'unknown';
-
-            final advice =
-                data['advice']?.toString() ?? '';
-
-            return Container(
-              margin: const EdgeInsets.only(bottom: 10),
-              padding: const EdgeInsets.all(12),
-              decoration: BoxDecoration(
-                border: Border.all(
-                  color: Colors.grey.shade200,
-                ),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(
-                          nutrient,
-                          style: GoogleFonts.poppins(
-                            fontWeight: FontWeight.w700,
+                    Image.network(
+                      'https://lh3.googleusercontent.com/aida-public/AB6AXuCTbSOoHDInHddXxC9ALdpAfey4AurggqzMWNi8uP7Zf00MtG3ewour08AGh9GAwTytm81yEacK8pSR3bHcIxWMC9vwMuUwzPhmWISzuM30XDsjjPGICn83_b0WeT5AzIDQ1qYlDrCYrcuvAJQ7cKVOdC7DHRKA_W7sJTSUA6Mm5bDAhFu06QMgngSbUNXj4r5qE9Fv_aCMOcE5HPpwXh4ZuuamLiDVRIvmOob25NmaogoxrvoXcJlvsz5KWeu8NF4LRqPNALY054UF',
+                      fit: BoxFit.cover,
+                      errorBuilder: (context, error, stackTrace) {
+                        return Container(
+                          color: Colors.grey[400],
+                          child: const Center(
+                            child: Icon(Icons.image_not_supported),
                           ),
-                        ),
-                      ),
-                      _statusBadge(status),
-                    ],
-                  ),
-                  if (advice.isNotEmpty) ...[
-                    const SizedBox(height: 7),
-                    Text(
-                      advice,
-                      style: GoogleFonts.poppins(
-                        fontSize: 11,
-                        color: Colors.grey.shade700,
+                        );
+                      },
+                    ),
+                    Container(
+                      color: Colors.black.withValues(alpha: 0.2),
+                    ),
+                    Positioned(
+                      bottom: 20,
+                      left: 20,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'SATELLITE VERIFICATION',
+                            style: GoogleFonts.manrope(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                              color: Colors.white.withValues(alpha: 0.7),
+                              letterSpacing: 1.2,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            'Sector 4 Health Overview',
+                            style: GoogleFonts.plusJakartaSans(
+                              fontSize: 24,
+                              fontWeight: FontWeight.w700,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ],
-                ],
-              ),
-            );
-          },
-        ).toList(),
-      ),
-    );
-  }
-
-  Widget _buildWaterUsage() {
-    return _sectionCard(
-      title: 'Water Usage',
-      icon: Icons.water_outlined,
-      child: Row(
-        children: [
-          Icon(
-            Icons.info_outline,
-            color: Colors.grey.shade600,
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text(
-              'Water usage analytics are pending because the irrigation module is not yet connected to the reporting system.',
-              style: GoogleFonts.poppins(
-                fontSize: 12,
-                color: Colors.grey.shade700,
+                ),
               ),
             ),
           ),
@@ -1314,63 +916,30 @@ class _ReportsTabState extends State<ReportsTab> {
       ),
     );
   }
+}
 
-  Widget _buildBackendRecommendations() {
-    if (_recommendations.isEmpty) {
-      return const SizedBox.shrink();
-    }
+// ─── Yield Card ──────────────────────────────────────────────────────────────
 
-    return _sectionCard(
-      title: 'SmartCrop Recommendations',
-      icon: Icons.auto_awesome_outlined,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: _recommendations.map(
-          (recommendation) {
-            return Padding(
-              padding: const EdgeInsets.only(bottom: 9),
-              child: Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Padding(
-                    padding: EdgeInsets.only(top: 2),
-                    child: Icon(
-                      Icons.check_circle_outline,
-                      size: 18,
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      recommendation.toString(),
-                      style: GoogleFonts.poppins(
-                        fontSize: 12,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            );
-          },
-        ).toList(),
-      ),
-    );
-  }
+class _YieldCard extends StatelessWidget {
+  final bool hasData;
 
-  Widget _sectionCard({
-    required String title,
-    required IconData icon,
-    required Widget child,
-  }) {
+  const _YieldCard({
+    required this.hasData,
+  });
+
+  @override
+  Widget build(BuildContext context) {
     return Container(
-      margin: const EdgeInsets.fromLTRB(16, 8, 16, 8),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(16),
+        border: Border(
+          left: BorderSide(color: AppColors.primary, width: 4),
+        ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(.05),
+            color: Colors.black.withValues(alpha: 0.05),
             blurRadius: 12,
             offset: const Offset(0, 4),
           ),
@@ -1380,187 +949,599 @@ class _ReportsTabState extends State<ReportsTab> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Icon(
-                icon,
-                size: 20,
-                color: AppColors.primary,
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'ESTIMATED YIELD',
+                    style: GoogleFonts.manrope(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.onSurfaceVariant,
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    hasData ? 'Data Available' : 'N/A',
+                    style: GoogleFonts.plusJakartaSans(
+                      fontSize: 24,
+                      fontWeight: FontWeight.w700,
+                      color: AppColors.onBackground,
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(width: 8),
-              Text(
-                title,
-                style: GoogleFonts.poppins(
-                  fontSize: 16,
-                  fontWeight: FontWeight.w700,
+              Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: AppColors.primary.withValues(alpha: 0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.trending_up_rounded,
+                  color: AppColors.primary,
+                  size: 22,
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 15),
-          child,
+          const SizedBox(height: 16),
+          SizedBox(
+            height: 56,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: List.generate(
+                6,
+                (i) {
+                  final heights = [0.4, 0.6, 0.55, 0.8, 0.7, 0.95];
+                  final isLast = i == 5;
+
+                  return Expanded(
+                    child: Container(
+                      margin: const EdgeInsets.symmetric(horizontal: 2),
+                      height: heights[i] * 56,
+                      decoration: BoxDecoration(
+                        color: isLast
+                            ? AppColors.primary
+                            : AppColors.primary.withValues(alpha: 0.2),
+                        borderRadius: const BorderRadius.only(
+                          topLeft: Radius.circular(4),
+                          topRight: Radius.circular(4),
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            hasData
+                ? 'Based on available field data'
+                : 'Yield prediction data not available',
+            style: GoogleFonts.manrope(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: AppColors.primary,
+            ),
+          ),
         ],
       ),
     );
   }
+}
 
-  Widget _metric(
-    String title,
-    String value,
-    IconData icon,
-  ) {
-    return Column(
-      children: [
-        Icon(
-          icon,
-          color: AppColors.primary,
-          size: 23,
-        ),
-        const SizedBox(height: 6),
-        Text(
-          value,
-          textAlign: TextAlign.center,
-          style: GoogleFonts.poppins(
-            fontSize: 13,
-            fontWeight: FontWeight.w700,
+// ─── Water Usage Card ────────────────────────────────────────────────────────
+
+class _WaterUsageCard extends StatelessWidget {
+  final double progress;
+
+  const _WaterUsageCard({
+    required this.progress,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.05),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
           ),
-        ),
-        const SizedBox(height: 2),
-        Text(
-          title,
-          textAlign: TextAlign.center,
-          style: GoogleFonts.poppins(
-            fontSize: 9,
-            color: Colors.grey.shade600,
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'WATER USAGE',
+            style: GoogleFonts.manrope(
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+              color: AppColors.onSurfaceVariant,
+              letterSpacing: 0.5,
+            ),
           ),
-        ),
-      ],
+          const SizedBox(height: 16),
+          SizedBox(
+            height: 80,
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                SizedBox(
+                  width: 80,
+                  height: 80,
+                  child: CustomPaint(
+                    painter: CircularProgressPainter(
+                      progress: progress,
+                      backgroundColor: const Color(0xFFE7E9E4),
+                      progressColor: const Color(0xFF00796B),
+                    ),
+                  ),
+                ),
+                Text(
+                  progress == 0
+                      ? '--'
+                      : '${(progress * 100).round()}%',
+                  style: GoogleFonts.plusJakartaSans(
+                    fontSize: 22,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.onBackground,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Efficiency',
+                style: GoogleFonts.manrope(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'Monitoring',
+                style: GoogleFonts.manrope(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  color: const Color(0xFF00796B),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
+}
 
-  Widget _statusBadge(String status) {
-    final color = _statusColor(status);
+// ─── Soil Health Card ────────────────────────────────────────────────────────
+
+class _SoilHealthCard extends StatelessWidget {
+  final int score;
+  final String description;
+
+  const _SoilHealthCard({
+    required this.score,
+    required this.description,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final displayScore = score > 0
+        ? '${(score / 10).toStringAsFixed(1)}/10'
+        : '--/10';
 
     return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.05),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'SOIL HEALTH INDEX',
+            style: GoogleFonts.manrope(
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+              color: AppColors.onSurfaceVariant,
+              letterSpacing: 0.5,
+            ),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            displayScore,
+            style: GoogleFonts.plusJakartaSans(
+              fontSize: 28,
+              fontWeight: FontWeight.w700,
+              color: AppColors.onBackground,
+            ),
+          ),
+          const SizedBox(height: 12),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: LinearProgressIndicator(
+              value: score > 0 ? (score / 100).clamp(0.0, 1.0) : 0,
+              minHeight: 8,
+              backgroundColor: const Color(0xFFE7E9E4),
+              valueColor: AlwaysStoppedAnimation<Color>(
+                AppColors.secondary.withValues(alpha: 0.7),
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            description,
+            style: GoogleFonts.plusJakartaSans(
+              fontSize: 13,
+              color: AppColors.onSurfaceVariant,
+              height: 1.5,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── AI Insight Card ────────────────────────────────────────────────────────
+
+class _AiInsightCard extends StatelessWidget {
+  final String recommendation;
+
+  const _AiInsightCard({
+    required this.recommendation,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            AppColors.primaryContainer,
+            AppColors.secondary.withValues(alpha: 0.6),
+          ],
+        ),
+        borderRadius: BorderRadius.circular(20),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.1),
+            blurRadius: 16,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 48,
+            height: 48,
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.2),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: const Icon(
+              Icons.psychology_rounded,
+              color: Colors.white,
+              size: 24,
+            ),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'AI Harvest Insight',
+                  style: GoogleFonts.plusJakartaSans(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                    color: Colors.white,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  recommendation.isEmpty
+                      ? 'Monitoring insights will appear when sensor history is available.'
+                      : recommendation,
+                  style: GoogleFonts.plusJakartaSans(
+                    fontSize: 13,
+                    color: Colors.white.withValues(alpha: 0.9),
+                    height: 1.5,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Growth Chart ───────────────────────────────────────────────────────────
+
+class _GrowthChart extends StatelessWidget {
+  final List<double> values;
+
+  const _GrowthChart({
+    required this.values,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.05),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        children: [
+          SizedBox(
+            height: 200,
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+              children: List.generate(
+                7,
+                (i) {
+                  final height = i < values.length
+                      ? values[i].clamp(0.1, 1.0)
+                      : 0.1;
+
+                  return Column(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      Container(
+                        width: 24,
+                        height: height * 160,
+                        decoration: BoxDecoration(
+                          color: AppColors.primary.withValues(alpha: 0.2),
+                          borderRadius: const BorderRadius.only(
+                            topLeft: Radius.circular(4),
+                            topRight: Radius.circular(4),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'][i],
+                        style: GoogleFonts.manrope(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w600,
+                          color: const Color(0xFF707A6C),
+                        ),
+                      ),
+                    ],
+                  );
+                },
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Report Item ─────────────────────────────────────────────────────────────
+
+class _ReportItem extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final Color iconColor;
+  final VoidCallback onDownload;
+
+  const _ReportItem({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.iconColor,
+    required this.onDownload,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border.all(
+          color: const Color(0xFFBFCABA),
+          width: 1,
+        ),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: iconColor.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Icon(
+              icon,
+              color: iconColor,
+              size: 18,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: GoogleFonts.plusJakartaSans(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.onBackground,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  subtitle,
+                  style: GoogleFonts.manrope(
+                    fontSize: 10,
+                    color: const Color(0xFF707A6C),
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 0.3,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          GestureDetector(
+            onTap: onDownload,
+            child: const Icon(
+              Icons.download_rounded,
+              color: Color(0xFF707A6C),
+              size: 20,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ─── Trend Button ───────────────────────────────────────────────────────────
+
+class _TrendButton extends StatelessWidget {
+  final String label;
+  final bool isActive;
+
+  const _TrendButton(
+    this.label,
+    this.isActive,
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
       padding: const EdgeInsets.symmetric(
-        horizontal: 9,
-        vertical: 5,
+        horizontal: 12,
+        vertical: 6,
       ),
       decoration: BoxDecoration(
-        color: color.withOpacity(.10),
-        borderRadius: BorderRadius.circular(20),
+        color: isActive ? Colors.white : Colors.transparent,
+        boxShadow: isActive
+            ? [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.05),
+                  blurRadius: 8,
+                  offset: const Offset(0, 2),
+                ),
+              ]
+            : [],
+        borderRadius: BorderRadius.circular(6),
       ),
       child: Text(
-        _prettyStatus(status),
-        style: GoogleFonts.poppins(
-          fontSize: 10,
+        label,
+        style: GoogleFonts.manrope(
+          fontSize: 11,
           fontWeight: FontWeight.w600,
-          color: color,
+          color: isActive
+              ? AppColors.primary
+              : AppColors.onSurfaceVariant,
         ),
       ),
     );
   }
+}
 
-  Widget _emptyInline(String text) {
-    return Text(
-      text,
-      style: GoogleFonts.poppins(
-        fontSize: 12,
-        color: Colors.grey.shade600,
+// ─── Circular Progress Painter ──────────────────────────────────────────────
+
+class CircularProgressPainter extends CustomPainter {
+  final double progress;
+  final Color backgroundColor;
+  final Color progressColor;
+
+  CircularProgressPainter({
+    required this.progress,
+    required this.backgroundColor,
+    required this.progressColor,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = Offset(
+      size.width / 2,
+      size.height / 2,
+    );
+
+    final radius = size.width / 2;
+    const strokeWidth = 8.0;
+
+    canvas.drawCircle(
+      center,
+      radius,
+      Paint()
+        ..color = backgroundColor
+        ..strokeWidth = strokeWidth
+        ..style = PaintingStyle.stroke,
+    );
+
+    canvas.drawArc(
+      Rect.fromCircle(
+        center: center,
+        radius: radius,
       ),
+      -90 * 3.14159 / 180,
+      progress * 360 * 3.14159 / 180,
+      false,
+      Paint()
+        ..color = progressColor
+        ..strokeWidth = strokeWidth
+        ..strokeCap = StrokeCap.round
+        ..style = PaintingStyle.stroke,
     );
   }
 
-  Widget _buildEmptyState() {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(30),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.analytics_outlined,
-              size: 60,
-              color: Colors.grey.shade400,
-            ),
-            const SizedBox(height: 16),
-            Text(
-              'No report data yet',
-              style: GoogleFonts.poppins(
-                fontSize: 18,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Sensor history for ${_prettyCrop(widget.crop)} has not been recorded yet.',
-              textAlign: TextAlign.center,
-              style: GoogleFonts.poppins(
-                fontSize: 12,
-                color: Colors.grey.shade600,
-              ),
-            ),
-            const SizedBox(height: 18),
-            ElevatedButton.icon(
-              onPressed: () => _loadReport(refresh: true),
-              icon: const Icon(Icons.refresh),
-              label: const Text('Refresh'),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildErrorState() {
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(30),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.error_outline,
-              size: 58,
-              color: Colors.red.shade300,
-            ),
-            const SizedBox(height: 14),
-            Text(
-              'Unable to load report',
-              style: GoogleFonts.poppins(
-                fontSize: 18,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            const SizedBox(height: 7),
-            Text(
-              _error ?? 'Unknown error',
-              textAlign: TextAlign.center,
-              style: GoogleFonts.poppins(
-                fontSize: 11,
-                color: Colors.grey.shade600,
-              ),
-            ),
-            const SizedBox(height: 18),
-            ElevatedButton.icon(
-              onPressed: () => _loadReport(refresh: true),
-              icon: const Icon(Icons.refresh),
-              label: const Text('Try Again'),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  String _prettyCrop(String crop) {
-    return crop
-        .replaceAll('_', ' ')
-        .split(' ')
-        .map(
-          (word) => word.isEmpty
-              ? ''
-              : '${word[0].toUpperCase()}${word.substring(1).toLowerCase()}',
-        )
-        .join(' ');
-  }
+  @override
+  bool shouldRepaint(
+    CircularProgressPainter oldDelegate,
+  ) =>
+      oldDelegate.progress != progress;
 }
