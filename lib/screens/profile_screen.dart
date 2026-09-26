@@ -9,6 +9,7 @@ import 'edit_profile_screen.dart';
 import 'notifications_screen.dart';
 import 'my_fields_screen.dart';
 import 'connected_sensors_screen.dart';
+import 'field_location_screen.dart';
 import 'help_center_screen.dart';
 import 'login_screen.dart';
 
@@ -71,6 +72,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           const SizedBox(height: 24),
+
           // ── User Info Section ──
           Center(
             child: Column(
@@ -89,9 +91,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   child: Stack(
                     children: [
                       Container(
-                        decoration: BoxDecoration(
+                        decoration: const BoxDecoration(
                           shape: BoxShape.circle,
-                          color: const Color(0xFFECEFEA),
+                          color: Color(0xFFECEFEA),
                         ),
                         child: ClipOval(
                           child: _profileImage != null
@@ -102,14 +104,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               : Image.network(
                                   'https://lh3.googleusercontent.com/aida-public/AB6AXuC0xuPpRW9QYwGaY8ZNsHfMk6fgujlwf5Ph7fSL-gCB633ccbVVoDy1bKpv5Ny40yKA_9OHQSrDxcW6MCIGWLOoIvJQ9Rv9HHp8DZN2G6VB5QB1OODUksuce5frO0nMEJbCprn7Xr5iZjiO81wnlQZqLx66XlohQpEHpwLehLFTwW0vqZkyVM2Sc1xKD6obZyV8nt7PbD4_qoDpyYavyNdSeRZFZAnSE7eo4xpJr7M0W1E9n-UVQJDVJ-GKoHzEUC9gIydbgTQh2LdZ',
                                   fit: BoxFit.cover,
-                                  errorBuilder: (context, error, stackTrace) =>
-                                      Container(
+                                  errorBuilder:
+                                      (context, error, stackTrace) =>
+                                          Container(
                                     color: Colors.grey[300],
                                     child: const Icon(Icons.person),
                                   ),
                                 ),
                         ),
                       ),
+
                       // Camera button
                       Positioned(
                         bottom: 0,
@@ -145,7 +149,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     ],
                   ),
                 ),
+
                 const SizedBox(height: 16),
+
                 // Name and Email
                 Text(
                   FirebaseAuth.instance.currentUser?.displayName ?? 'User',
@@ -155,7 +161,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     color: AppColors.onBackground,
                   ),
                 ),
+
                 const SizedBox(height: 4),
+
                 Text(
                   FirebaseAuth.instance.currentUser?.email ?? '',
                   style: GoogleFonts.plusJakartaSans(
@@ -163,7 +171,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     color: AppColors.onSurfaceVariant,
                   ),
                 ),
+
                 const SizedBox(height: 16),
+
                 // Edit Profile Button
                 Container(
                   decoration: BoxDecoration(
@@ -178,7 +188,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     child: InkWell(
                       onTap: () => Navigator.push(
                         context,
-                        MaterialPageRoute(builder: (_) => const EditProfileScreen()),
+                        MaterialPageRoute(
+                          builder: (_) => const EditProfileScreen(),
+                        ),
                       ),
                       borderRadius: BorderRadius.circular(20),
                       child: Padding(
@@ -201,7 +213,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ],
             ),
           ),
+
           const SizedBox(height: 40),
+
           // ── Account Settings Section ──
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -217,7 +231,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     letterSpacing: 0.5,
                   ),
                 ),
+
                 const SizedBox(height: 12),
+
                 _SettingCard(
                   icon: Icons.map_rounded,
                   iconColor: const Color(0xFFB9F474),
@@ -226,10 +242,29 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   onTap: () => Navigator.push(
                     context,
                     MaterialPageRoute(
-                        builder: (_) => const MyFieldsScreen()),
+                      builder: (_) => const MyFieldsScreen(),
+                    ),
                   ),
                 ),
+
                 const SizedBox(height: 12),
+
+                // ── NEW: Field Location ──
+                _SettingCard(
+                  icon: Icons.location_on_rounded,
+                  iconColor: AppColors.primary,
+                  title: 'Field Location',
+                  subtitle: 'Set Location',
+                  onTap: () => Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => const FieldLocationScreen(),
+                    ),
+                  ),
+                ),
+
+                const SizedBox(height: 12),
+
                 _SettingCard(
                   icon: Icons.notifications_rounded,
                   iconColor: AppColors.primary,
@@ -237,10 +272,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   onTap: () => Navigator.push(
                     context,
                     MaterialPageRoute(
-                        builder: (_) => const NotificationsScreen()),
+                      builder: (_) => const NotificationsScreen(),
+                    ),
                   ),
                 ),
+
                 const SizedBox(height: 12),
+
                 _SettingCard(
                   icon: Icons.sensors_rounded,
                   iconColor: const Color(0xFF00796B),
@@ -249,13 +287,16 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   onTap: () => Navigator.push(
                     context,
                     MaterialPageRoute(
-                        builder: (_) => const ConnectedSensorsScreen()),
+                      builder: (_) => const ConnectedSensorsScreen(),
+                    ),
                   ),
                 ),
               ],
             ),
           ),
+
           const SizedBox(height: 40),
+
           // ── Support Section ──
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -271,7 +312,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     letterSpacing: 0.5,
                   ),
                 ),
+
                 const SizedBox(height: 12),
+
                 _SettingCard(
                   icon: Icons.help_rounded,
                   iconColor: const Color(0xFFE7E9E4),
@@ -279,10 +322,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   title: 'Help Center',
                   onTap: () => Navigator.push(
                     context,
-                    MaterialPageRoute(builder: (_) => const HelpCenterScreen()),
+                    MaterialPageRoute(
+                      builder: (_) => const HelpCenterScreen(),
+                    ),
                   ),
                 ),
+
                 const SizedBox(height: 12),
+
                 _SettingCard(
                   icon: Icons.shield_rounded,
                   iconColor: const Color(0xFFE7E9E4),
@@ -293,7 +340,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ],
             ),
           ),
+
           const SizedBox(height: 40),
+
           // ── Logout Button ──
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -304,7 +353,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   borderRadius: BorderRadius.circular(12),
                   child: InkWell(
                     onTap: () {
-                      // Show logout confirmation
                       showDialog(
                         context: context,
                         builder: (context) => AlertDialog(
@@ -373,7 +421,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     ),
                   ),
                 ),
+
                 const SizedBox(height: 24),
+
                 Text(
                   'App Version 2.4.0 (Stable)',
                   style: GoogleFonts.manrope(
@@ -450,7 +500,9 @@ class _SettingCard extends StatelessWidget {
                   size: 20,
                 ),
               ),
+
               const SizedBox(width: 16),
+
               // Title and Subtitle
               Expanded(
                 child: Column(
@@ -467,6 +519,7 @@ class _SettingCard extends StatelessWidget {
                   ],
                 ),
               ),
+
               // Subtitle or Chevron
               if (subtitle != null)
                 Text(
@@ -479,7 +532,9 @@ class _SettingCard extends StatelessWidget {
                 )
               else
                 const SizedBox(width: 8),
+
               const SizedBox(width: 8),
+
               Icon(
                 Icons.chevron_right_rounded,
                 color: AppColors.onSurfaceVariant,

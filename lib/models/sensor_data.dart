@@ -54,6 +54,18 @@ class SensorData {
     'SoilTemp': soilTemp,
     'pH': pH,
   };
+
+  /// Readings keyed by the names the monitoring backend expects
+  /// (POST /monitor `current` and `history` entries).
+  Map<String, double> toMonitorValues() => {
+    'N': n,
+    'P': p,
+    'K': k,
+    'temperature': airTemp,
+    'humidity': airHumidity,
+    'ph': pH,
+    'soil_moisture': soilMoisturePercent,
+  };
 }
 
 enum MoistureStatus { optimal, low, dry }

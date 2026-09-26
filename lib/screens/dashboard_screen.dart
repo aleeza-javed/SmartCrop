@@ -149,7 +149,7 @@ _TopBar(topPad: topPad, sensorData: _sensorData, crop: _activeCrop),
                 ),
                   1 => SensorsTab(crop: _activeCrop),
                   2 => InsightsTab(sensorData: _sensorData, crop: _activeCrop),
-                  3 => const ReportsTab(),
+                  3 => ReportsTab(crop: _activeCrop),
                   4 => const ProfileScreen(),
               _ => Center(
                   child: Text(

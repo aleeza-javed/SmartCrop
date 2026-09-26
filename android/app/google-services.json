@@ -1,6 +1,7 @@
 {
   "project_info": {
     "project_number": "1083437709603",
+    "firebase_url": "https://smart-crop-ddf69-default-rtdb.firebaseio.com",
     "project_id": "smart-crop-ddf69",
     "storage_bucket": "smart-crop-ddf69.firebasestorage.app"
   },
@@ -13,6 +14,14 @@
         }
       },
       "oauth_client": [
+        {
+          "client_id": "1083437709603-0sain6dre9au4qs0fca4mugc5jfgi7r3.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "com.smartcrop.smart_crop",
+            "certificate_hash": "8f9dd626fa51f5006578f8dc31202ed2f4d092ac"
+          }
+        },
         {
           "client_id": "1083437709603-0us6ge3jj3hjto92i2jsrj2fsod777mm.apps.googleusercontent.com",
           "client_type": 3

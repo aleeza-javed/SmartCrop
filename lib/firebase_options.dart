@@ -52,6 +52,7 @@ class DefaultFirebaseOptions {
     messagingSenderId: '1083437709603',
     projectId: 'smart-crop-ddf69',
     authDomain: 'smart-crop-ddf69.firebaseapp.com',
+    databaseURL: 'https://smart-crop-ddf69-default-rtdb.firebaseio.com',
     storageBucket: 'smart-crop-ddf69.firebasestorage.app',
     measurementId: 'G-JD5ZHFL60L',
   );
@@ -61,9 +62,9 @@ class DefaultFirebaseOptions {
     appId: '1:1083437709603:android:be6fa7e6bb055b4992f496',
     messagingSenderId: '1083437709603',
     projectId: 'smart-crop-ddf69',
+    databaseURL: 'https://smart-crop-ddf69-default-rtdb.firebaseio.com',
     storageBucket: 'smart-crop-ddf69.firebasestorage.app',
   );
-
   static const FirebaseOptions ios = FirebaseOptions(
     apiKey: 'AIzaSyCaEE3hXbGLj_oesWxvEaDdV84DQUkCayE',
     appId: '1:1083437709603:ios:a82f94067d109a8992f496',

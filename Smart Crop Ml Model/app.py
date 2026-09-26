@@ -4,6 +4,7 @@ import numpy as np
 import pandas as pd
 import joblib
 from flask import Flask, request, jsonify
+from flask_cors import CORS
 
 # Monitor/alert modules live in the "fertillizer Alerts" folder.
 ALERTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fertillizer Alerts")
@@ -15,21 +16,32 @@ from monitoring_engine import (analyze_monitoring, UnknownCropError,
                                InvalidReadingError)
 
 app = Flask(__name__)
+CORS(app)
 
 # ── Safe model loading ─────────────────────────────────────────────
-MODEL_PATH = "smartcrop_rf_model.pkl"
-LE_PATH = "smartcrop_label_encoder.pkl"
+# Resolved relative to this file so the server starts from any working
+# directory. Regenerate the artifacts with: python train.py
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+MODEL_PATH = os.path.join(BASE_DIR, "smartcrop_rf_model.pkl")
+LE_PATH = os.path.join(BASE_DIR, "smartcrop_label_encoder.pkl")
 
 if not os.path.exists(MODEL_PATH):
-    raise FileNotFoundError(f"Model file not found: {MODEL_PATH}")
+    raise FileNotFoundError(
+        f"Model file not found: {MODEL_PATH}\n"
+        "Generate it first:  python train.py"
+    )
 
 if not os.path.exists(LE_PATH):
-    raise FileNotFoundError(f"Label encoder not found: {LE_PATH}")
+    raise FileNotFoundError(
+        f"Label encoder not found: {LE_PATH}\n"
+        "Generate it first:  python train.py"
+    )
 
 model = joblib.load(MODEL_PATH)
 le = joblib.load(LE_PATH)
 
-print("✅ Model loaded successfully")
+# ASCII-only: Windows consoles default to cp1252 and raise on emoji.
+print("[OK] Model loaded successfully")
 print("Classes:", getattr(model, "classes_", None))
 
 # ── Config ─────────────────────────────────────────────────────────
@@ -271,6 +283,6 @@ def monitor_config():
 
 # ── Run app ─────────────────────────────────────────────────────────
 if __name__ == "__main__":
-    print("🚀 Starting Flask server...")
+    print("Starting Flask server...")
     app.run(debug=True, host="0.0.0.0",
             port=int(os.environ.get("SMARTCROP_PORT", 5000)))

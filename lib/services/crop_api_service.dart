@@ -1,6 +1,18 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
 
+/// Thrown when the SmartCrop backend answers with a non-200 status.
+/// Carries the server-provided `error` message when there is one.
+class CropApiException implements Exception {
+  final String message;
+  final int? statusCode;
+
+  const CropApiException(this.message, {this.statusCode});
+
+  @override
+  String toString() => message;
+}
+
 class CropPrediction {
   final String name;
   final double confidence;
@@ -111,7 +123,7 @@ class MonitoringResult {
 class CropApiService {
   // Android emulator: http://10.0.2.2:5000
   // iOS simulator / real device: use your Mac's IP
-  static const baseUrl = 'http://192.168.18.84:5000';
+  static const baseUrl = 'http://192.168.111.186:5000';
 
   static Future<List<CropPrediction>> predictCrops({
     required double nitrogen,
