@@ -452,7 +452,7 @@ class _FieldLocationScreenState
                             const NeverScrollableScrollPhysics(),
                         itemCount:
                             _searchResults.length,
-                        separatorBuilder: (_, __) =>
+                        separatorBuilder: (_, _) =>
                             const Divider(height: 1),
                         itemBuilder:
                             (context, index) {

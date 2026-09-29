@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:async';
 import 'package:http/http.dart' as http;
 
 /// Thrown when the SmartCrop backend answers with a non-200 status.
@@ -123,7 +124,7 @@ class MonitoringResult {
 class CropApiService {
   // Android emulator: http://10.0.2.2:5000
   // iOS simulator / real device: use your Mac's IP
-  static const baseUrl = 'http://192.168.111.186:5000';
+  static const baseUrl = 'http://192.168.18.84:5000';
 
   static Future<List<CropPrediction>> predictCrops({
     required double nitrogen,
@@ -212,13 +213,206 @@ class CropApiService {
         'crop': crop,
         'current': current,
       }),
-    );
-
+    ).timeout(const Duration(seconds: 10));
     if (response.statusCode == 200) {
       final data = json.decode(response.body);
       return MonitoringResult.fromJson(data as Map<String, dynamic>);
     } else {
-      throw Exception('Failed to fetch monitoring alerts: ${response.statusCode}');
+      throw Exception('Monitoring alerts unavailable (server ${response.statusCode}).');
     }
+  }
+
+  static Future<WaterReport> getWaterReport({
+    required String crop,
+    required List<Map<String, dynamic>> history,
+  }) async {
+    final response = await http.post(
+      Uri.parse('$baseUrl/reports/water'),
+      headers: {'Content-Type': 'application/json'},
+      body: json.encode({'crop': crop, 'history': history}),
+    ).timeout(const Duration(seconds: 10));
+    if (response.statusCode == 200) {
+      return WaterReport.fromJson(json.decode(response.body) as Map<String, dynamic>);
+    }
+    throw Exception('Water report unavailable (server ${response.statusCode}).');
+  }
+
+  static Future<NutrientReport> getNutrientReport({
+    required String crop,
+    required List<Map<String, dynamic>> history,
+  }) async {
+    final response = await http.post(
+      Uri.parse('$baseUrl/reports/nutrients'),
+      headers: {'Content-Type': 'application/json'},
+      body: json.encode({'crop': crop, 'history': history}),
+    ).timeout(const Duration(seconds: 10));
+    if (response.statusCode == 200) {
+      return NutrientReport.fromJson(json.decode(response.body) as Map<String, dynamic>);
+    }
+    throw Exception('Nutrient report unavailable (server ${response.statusCode}).');
+  }
+
+  static Future<MonthlyHealthReport> getMonthlyHealthReport({
+    required String crop,
+    required List<Map<String, dynamic>> history,
+  }) async {
+    final response = await http.post(
+      Uri.parse('$baseUrl/reports/monthly-health'),
+      headers: {'Content-Type': 'application/json'},
+      body: json.encode({'crop': crop, 'history': history}),
+    ).timeout(const Duration(seconds: 10));
+    if (response.statusCode == 200) {
+      return MonthlyHealthReport.fromJson(json.decode(response.body) as Map<String, dynamic>);
+    }
+    throw Exception('Monthly health unavailable (server ${response.statusCode}).');
+  }
+
+  static Future<SoilHealthReport> getSoilHealthReport({
+    required String crop,
+    required List<Map<String, dynamic>> history,
+  }) async {
+    final response = await http.post(
+      Uri.parse('$baseUrl/reports/soil-health'),
+      headers: {'Content-Type': 'application/json'},
+      body: json.encode({'crop': crop, 'history': history}),
+    ).timeout(const Duration(seconds: 10));
+    if (response.statusCode == 200) {
+      return SoilHealthReport.fromJson(json.decode(response.body) as Map<String, dynamic>);
+    }
+    throw Exception('Soil health unavailable (server ${response.statusCode}).');
+  }
+}
+
+// ── Report Models ──────────────────────────────────────────────────────
+
+class WaterReport {
+  final String crop;
+  final String parameter;
+  final String status;
+  final double currentValue;
+  final List<double> recommendedRange;
+  final String unit;
+  final Map<String, dynamic> statistics;
+  final Map<String, int> statusBreakdown;
+  final String trend;
+  final List<Map<String, dynamic>> warnings;
+  final String note;
+
+  const WaterReport({
+    required this.crop,
+    required this.parameter,
+    required this.status,
+    required this.currentValue,
+    required this.recommendedRange,
+    required this.unit,
+    required this.statistics,
+    required this.statusBreakdown,
+    required this.trend,
+    required this.warnings,
+    required this.note,
+  });
+
+  factory WaterReport.fromJson(Map<String, dynamic> json) {
+    return WaterReport(
+      crop: json['crop'] as String? ?? '',
+      parameter: json['parameter'] as String? ?? '',
+      status: json['status'] as String? ?? '',
+      currentValue: (json['current_value'] as num?)?.toDouble() ?? 0,
+      recommendedRange:
+          (json['recommended_range'] as List<dynamic>?)?.map((e) => (e as num).toDouble()).toList() ?? [],
+      unit: json['unit'] as String? ?? '',
+      statistics: json['statistics'] as Map<String, dynamic>? ?? {},
+      statusBreakdown: json['status_breakdown'] as Map<String, int>? ?? {},
+      trend: json['trend'] as String? ?? '',
+      warnings: (json['warnings'] as List<dynamic>?)
+              ?.map((e) => Map<String, dynamic>.from(e as Map))
+              .toList() ??
+          [],
+      note: json['note'] as String? ?? '',
+    );
+  }
+}
+
+class NutrientReport {
+  final String crop;
+  final String status;
+  final int healthScore;
+  final Map<String, dynamic> nutrients;
+  final String? latestReadingTimestamp;
+
+  const NutrientReport({
+    required this.crop,
+    required this.status,
+    required this.healthScore,
+    required this.nutrients,
+    required this.latestReadingTimestamp,
+  });
+
+  factory NutrientReport.fromJson(Map<String, dynamic> json) {
+    return NutrientReport(
+      crop: json['crop'] as String? ?? '',
+      status: json['status'] as String? ?? '',
+      healthScore: (json['health_score'] as num?)?.toInt() ?? 0,
+      nutrients: json['nutrients'] as Map<String, dynamic>? ?? {},
+      latestReadingTimestamp: json['latest_reading_timestamp'] as String?,
+    );
+  }
+}
+
+class MonthlyHealthReport {
+  final String crop;
+  final List<Map<String, dynamic>> months;
+  final int totalReadings;
+
+  const MonthlyHealthReport({
+    required this.crop,
+    required this.months,
+    required this.totalReadings,
+  });
+
+  factory MonthlyHealthReport.fromJson(Map<String, dynamic> json) {
+    return MonthlyHealthReport(
+      crop: json['crop'] as String? ?? '',
+      months: (json['months'] as List<dynamic>?)
+              ?.map((e) => Map<String, dynamic>.from(e as Map))
+              .toList() ??
+          [],
+      totalReadings: (json['total_readings'] as num?)?.toInt() ?? 0,
+    );
+  }
+}
+
+class SoilHealthReport {
+  final String crop;
+  final double soilHealthIndex;
+  final String overallStatus;
+  final int scoreOutOf;
+  final Map<String, dynamic> components;
+  final List<Map<String, dynamic>> warnings;
+  final String? latestReadingTimestamp;
+
+  const SoilHealthReport({
+    required this.crop,
+    required this.soilHealthIndex,
+    required this.overallStatus,
+    required this.scoreOutOf,
+    required this.components,
+    required this.warnings,
+    required this.latestReadingTimestamp,
+  });
+
+  factory SoilHealthReport.fromJson(Map<String, dynamic> json) {
+    return SoilHealthReport(
+      crop: json['crop'] as String? ?? '',
+      soilHealthIndex: (json['soil_health_index'] as num?)?.toDouble() ?? 0,
+      overallStatus: json['overall_status'] as String? ?? '',
+      scoreOutOf: (json['score_out_of'] as num?)?.toInt() ?? 0,
+      components: json['components'] as Map<String, dynamic>? ?? {},
+      warnings: (json['warnings'] as List<dynamic>?)
+              ?.map((e) => Map<String, dynamic>.from(e as Map))
+              .toList() ??
+          [],
+      latestReadingTimestamp: json['latest_reading_timestamp'] as String?,
+    );
   }
 }

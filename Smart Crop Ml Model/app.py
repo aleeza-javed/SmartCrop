@@ -1,5 +1,6 @@
 import os
 import sys
+import datetime
 import numpy as np
 import pandas as pd
 import joblib
@@ -11,9 +12,9 @@ ALERTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fertilliz
 if ALERTS_DIR not in sys.path:
     sys.path.insert(0, ALERTS_DIR)
 
-from crop_thresholds import CROP_THRESHOLDS, MONITOR_CONFIG, available_crops
-from monitoring_engine import (analyze_monitoring, UnknownCropError,
-                               InvalidReadingError)
+from crop_thresholds import CROP_THRESHOLDS, MONITOR_CONFIG, available_crops, get_thresholds, config_for_crop
+from monitoring_engine import (analyze_monitoring, classify_reading, UnknownCropError,
+                                InvalidReadingError)
 
 app = Flask(__name__)
 CORS(app)
@@ -280,6 +281,339 @@ def monitor_config():
         "thresholds": CROP_THRESHOLDS,
     })
 
+
+# ── Report Endpoints ────────────────────────────────
+
+@app.route("/reports/water", methods=["POST"])
+def reports_water():
+    """Water/Moisture monitoring report for the active crop.
+
+    Body: {"crop": str, "history": [{...sensor readings...}]}
+    Uses soil_moisture data from historical readings and crop-specific thresholds.
+    """
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "No JSON body provided"}), 400
+
+    crop = data.get("crop", "").lower().strip()
+    if not crop or crop not in CROP_THRESHOLDS:
+        return jsonify({"error": "Valid crop required"}), 400
+
+    history = data.get("history", [])
+    if not history:
+        return jsonify({"crop": crop, "status": "insufficient_data",
+            "message": "No historical readings provided."}), 200
+
+    thresholds = get_thresholds(crop)
+    soil_moisture_cfg = thresholds.get("soil_moisture")
+    if not soil_moisture_cfg:
+        return jsonify({"error": "No soil_moisture threshold configured"}), 400
+
+    lo = soil_moisture_cfg["min"]
+    hi = soil_moisture_cfg["max"]
+    buf = soil_moisture_cfg.get("buffer", 10)
+
+    moisture_values = []
+    for r in history:
+        val = r.get('soilMoisturePercent') or r.get('soil_moisture') or r.get('soil_moisture_percent')
+        if val is not None:
+            try:
+                moisture_values.append(float(val))
+            except (ValueError, TypeError):
+                pass
+
+    if not moisture_values:
+        return jsonify({"crop": crop, "status": "insufficient_data",
+            "message": "No soil moisture values found in history."}), 200
+
+    moisture_values.sort()
+    current_moisture = moisture_values[-1]
+
+    if lo <= current_moisture <= hi:
+        current_status = "NORMAL"
+    elif (lo - buf) <= current_moisture <= (hi + buf):
+        current_status = "WARNING"
+    else:
+        current_status = "CRITICAL"
+
+    if len(moisture_values) >= 2:
+        slope = float(np.polyfit(np.arange(len(moisture_values)), moisture_values, 1)[0])
+        if abs(slope) < 0.1:
+            trend = "stable"
+        elif slope > 0:
+            trend = "increasing"
+        else:
+            trend = "decreasing"
+    else:
+        trend = "insufficient_data"
+
+    avg_moisture = round(sum(moisture_values) / len(moisture_values), 2)
+    warnings = []
+    if current_status == "CRITICAL":
+        if current_moisture < lo - buf:
+            warnings.append({"type": "low_moisture", "severity": "CRITICAL",
+                "message": f"Soil moisture is critically low ({current_moisture:.1f}%). Recommended range: {lo}-{hi}%."})
+        else:
+            warnings.append({"type": "high_moisture", "severity": "CRITICAL",
+                "message": f"Soil moisture is critically high ({current_moisture:.1f}%). Recommended range: {lo}-{hi}%."})
+    elif current_status == "WARNING":
+        warnings.append({"type": "moisture_out_of_range", "severity": "WARNING",
+            "message": f"Soil moisture ({current_moisture:.1f}%) is outside optimal range ({lo}-{hi}%)."})
+
+    normal_count = sum(1 for v in moisture_values if lo <= v <= hi)
+    warning_count = sum(1 for v in moisture_values if (lo - buf) <= v <= (hi + buf) and not (lo <= v <= hi))
+    critical_count = sum(1 for v in moisture_values if v < (lo - buf) or v > (hi + buf))
+
+    return jsonify({
+        "crop": crop,
+        "parameter": "soil_moisture",
+        "status": current_status,
+        "current_value": round(current_moisture, 2),
+        "recommended_range": [lo, hi],
+        "unit": soil_moisture_cfg.get("unit", "%"),
+        "statistics": {"average": avg_moisture, "minimum": round(min(moisture_values), 2),
+            "maximum": round(max(moisture_values), 2), "total_readings": len(moisture_values)},
+        "status_breakdown": {"normal": normal_count, "warning": warning_count, "critical": critical_count},
+        "trend": trend,
+        "warnings": warnings,
+        "note": "Soil moisture percentage is the only measurable water-related metric. Actual water volume requires a flow meter sensor not present in SmartCrop."
+    })
+
+
+@app.route("/reports/nutrients", methods=["POST"])
+def reports_nutrients():
+    """Soil nutrient health report for the active crop."""
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "No JSON body provided"}), 400
+    crop = data.get("crop", "").lower().strip()
+    if not crop or crop not in CROP_THRESHOLDS:
+        return jsonify({"error": "Valid crop required"}), 400
+    history = data.get("history", [])
+    if not history:
+        return jsonify({"crop": crop, "status": "insufficient_data", "message": "No historical readings provided."}), 200
+
+    thresholds = get_thresholds(crop)
+    config = config_for_crop(crop)
+    latest = history[-1]
+
+    current = {}
+    for param in ["N", "P", "K"]:
+        val = latest.get(param) or latest.get(param.lower())
+        if val is not None:
+            current[param] = float(val)
+
+    nutrient_results = {}
+    for param in ["N", "P", "K"]:
+        if param not in current:
+            nutrient_results[param] = {"status": "missing", "message": f"No {param} data"}
+            continue
+        cfg = thresholds[param]
+        value = current[param]
+        status = classify_reading(value, cfg)
+        nutrient_results[param] = {
+            "status": status, "current": round(value, 2),
+            "optimal_range": [cfg["min"], cfg["max"]],
+            "unit": cfg.get("unit", ""), "label": cfg.get("label", param),
+            "message": f"{param} level is {'within' if status == 'NORMAL' else 'outside'} the optimal range."
+        }
+
+    ph_val = latest.get('pH') or latest.get('ph')
+    if ph_val is not None:
+        ph_cfg = thresholds["ph"]
+        ph_status = classify_reading(float(ph_val), ph_cfg)
+        nutrient_results["pH"] = {"status": ph_status, "current": round(float(ph_val), 2), "optimal_range": [ph_cfg["min"], ph_cfg["max"]], "unit": ph_cfg.get("unit", ""), "label": ph_cfg.get("label", "pH")}
+
+    ec_val = latest.get('EC') or latest.get('ec')
+    if ec_val is not None:
+        nutrient_results["EC"] = {"status": "info", "current": round(float(ec_val), 2), "message": "Electrical conductivity recorded."}
+
+    statuses = [r["status"] for r in nutrient_results.values() if "status" in r]
+    if "CRITICAL" in statuses: overall = "CRITICAL"
+    elif "WARNING" in statuses: overall = "WARNING"
+    elif all(s == "NORMAL" for s in statuses): overall = "NORMAL"
+    else: overall = "INSUFFICIENT_DATA"
+
+    scoring = config["scoring"]
+    health_score = scoring["base"]
+    for param, r in nutrient_results.items():
+        if r["status"] == "WARNING": health_score -= scoring["warning"]
+        elif r["status"] == "CRITICAL": health_score -= scoring["critical"]
+    health_score = max(0, health_score)
+
+    return jsonify({"crop": crop, "status": overall, "health_score": health_score, "nutrients": nutrient_results, "latest_reading_timestamp": latest.get('timestamp')})
+
+
+@app.route("/reports/monthly-health", methods=["POST"])
+def reports_monthly_health():
+    """Monthly crop health report aggregating historical sensor data."""
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "No JSON body provided"}), 400
+    crop = data.get("crop", "").lower().strip()
+    if not crop or crop not in CROP_THRESHOLDS:
+        return jsonify({"error": "Valid crop required"}), 400
+    history = data.get("history", [])
+    if not history:
+        return jsonify({"crop": crop, "months": [], "message": "No historical readings provided."}), 200
+
+    thresholds = get_thresholds(crop)
+    config = config_for_crop(crop)
+
+    monthly_data = {}
+    for r in history:
+        ts = r.get('timestamp', '')
+        try:
+            dt = datetime.fromisoformat(ts.replace('Z', '+00:00'))
+            month_key = f"{dt.year}-{dt.month:02d}"
+        except Exception:
+            date_key = r.get('dateKey', '')
+            if date_key:
+                parts = date_key.split('-')
+                if len(parts) >= 2:
+                    month_key = f"{parts[0]}-{parts[1]}"
+                else:
+                    continue
+            else:
+                continue
+        if month_key not in monthly_data:
+            monthly_data[month_key] = []
+        monthly_data[month_key].append(r)
+
+    months = []
+    for month_key in sorted(monthly_data.keys()):
+        month_readings = monthly_data[month_key]
+
+        avg_data = {}
+        param_counts = {}
+        for r in month_readings:
+            for key in ["N", "P", "K", "pH", "temperature", "humidity", "soilMoisturePercent", "soilTemp", "EC", "RainPercent"]:
+                val = r.get(key)
+                if val is not None:
+                    if key not in avg_data:
+                        avg_data[key] = 0
+                        param_counts[key] = 0
+                    avg_data[key] += float(val)
+                    param_counts[key] += 1
+        for key in avg_data:
+            avg_data[key] = round(avg_data[key] / param_counts[key], 2)
+
+        alert_count = 0
+        deficient_count = 0
+        excess_count = 0
+        for r in month_readings:
+            for param in ["N", "P", "K", "pH", "soilMoisturePercent"]:
+                cfg = thresholds.get(param)
+                if not cfg:
+                    continue
+                val = r.get(param)
+                if val is None:
+                    continue
+                try:
+                    v = float(val)
+                    status = classify_reading(v, cfg)
+                    if status in ("CRITICAL", "WARNING"):
+                        alert_count += 1
+                        if v < cfg["min"]:
+                            deficient_count += 1
+                        else:
+                            excess_count += 1
+                except (ValueError, TypeError):
+                    continue
+
+        try:
+            current = {}
+            for param in thresholds:
+                val = month_readings[-1].get(param)
+                if val is not None:
+                    current[param] = float(val)
+            if len(current) >= 3:
+                monitor_result = analyze_monitoring(crop, current, month_readings if len(month_readings) > 1 else None, config)
+                health_score = monitor_result["health_score"]
+                overall_status = monitor_result["overall_status"]
+                alerts = monitor_result.get("alerts", [])
+            else:
+                health_score = 0
+                overall_status = "INSUFFICIENT_DATA"
+                alerts = []
+        except Exception:
+            health_score = 0
+            overall_status = "INSUFFICIENT_DATA"
+            alerts = []
+
+        months.append({
+            "month": month_key, "readings_count": len(month_readings),
+            "averages": avg_data, "health_score": health_score,
+            "overall_status": overall_status, "alert_count": alert_count,
+            "deficient_count": deficient_count, "excess_count": excess_count,
+            "alerts": alerts[:5],
+        })
+
+    return jsonify({"crop": crop, "months": months, "total_readings": len(history)})
+
+
+@app.route("/reports/soil-health", methods=["POST"])
+def reports_soil_health():
+    """Soil Health Index based on actual soil measurements."""
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "No JSON body provided"}), 400
+    crop = data.get("crop", "").lower().strip()
+    if not crop or crop not in CROP_THRESHOLDS:
+        return jsonify({"error": "Valid crop required"}), 400
+    history = data.get("history", [])
+    if not history:
+        return jsonify({"crop": crop, "status": "insufficient_data", "message": "No historical readings provided."}), 200
+
+    thresholds = get_thresholds(crop)
+    config = config_for_crop(crop)
+    latest = history[-1]
+
+    soil_params = ["N", "P", "K", "pH", "soilMoisturePercent", "soilTemp"]
+    if latest.get('EC') is not None or latest.get('ec') is not None:
+        soil_params.append("EC")
+
+    component_scores = {}
+    total_score = 0
+    max_possible = 0
+    warnings = []
+
+    for param in soil_params:
+        cfg = thresholds.get(param)
+        if not cfg:
+            component_scores[param] = {"score": 0, "status": "no_threshold", "message": f"No threshold for {param}."}
+            continue
+        val = latest.get(param)
+        if val is None:
+            component_scores[param] = {"score": 0, "status": "missing", "message": f"No {param} data."}
+            continue
+        try:
+            v = float(val)
+        except (ValueError, TypeError):
+            component_scores[param] = {"score": 0, "status": "invalid", "message": f"{param} is not numeric."}
+            continue
+        status = classify_reading(v, cfg)
+        if status == "NORMAL":
+            score = 100
+        elif status == "WARNING":
+            score = 70
+            warnings.append({"parameter": param, "label": cfg.get("label", param), "severity": "WARNING", "value": v, "message": f"{cfg.get('label', param)} outside optimal range."})
+        else:
+            score = 30
+            warnings.append({"parameter": param, "label": cfg.get("label", param), "severity": "CRITICAL", "value": v, "message": f"{cfg.get('label', param)} critically outside optimal range."})
+        component_scores[param] = {"score": score, "status": status, "value": v, "optimal_range": [cfg["min"], cfg["max"]], "unit": cfg.get("unit", ""), "label": cfg.get("label", param)}
+        total_score += score
+        max_possible += 100
+
+    soil_health_index = round((total_score / max_possible), 2) if max_possible > 0 else 0
+    statuses = [cs["status"] for cs in component_scores.values() if cs["status"] in ("NORMAL", "WARNING", "CRITICAL")]
+    if "CRITICAL" in statuses: overall_status = "CRITICAL"
+    elif "WARNING" in statuses: overall_status = "WARNING"
+    elif all(s == "NORMAL" for s in statuses): overall_status = "NORMAL"
+    elif statuses: overall_status = "INSUFFICIENT_DATA"
+    else: overall_status = "NO_DATA"
+
+    return jsonify({"crop": crop, "soil_health_index": soil_health_index, "overall_status": overall_status, "score_out_of": 100, "components": component_scores, "warnings": warnings, "latest_reading_timestamp": latest.get('timestamp')})
 
 # ── Run app ─────────────────────────────────────────────────────────
 if __name__ == "__main__":

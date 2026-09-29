@@ -29,6 +29,7 @@ class _SensorsTabState extends State<SensorsTab> {
     _subscription = _sensorService.sensorDataStream().listen((data) {
       if (mounted) {
         setState(() => _sensorData = data);
+        _sensorService.recordReading(data, crop: widget.crop);
         _fetchAlertCount(data);
       }
     });

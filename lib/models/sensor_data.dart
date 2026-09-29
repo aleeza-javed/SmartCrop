@@ -66,6 +66,25 @@ class SensorData {
     'ph': pH,
     'soil_moisture': soilMoisturePercent,
   };
+
+  /// True while the device has not reported a usable reading yet.
+  ///
+  /// `fromJson` maps every absent field to `0`, so a disconnected or
+  /// not-yet-published node produces an all-zero [SensorData] - the same
+  /// object `SensorService._empty()` returns. Threshold checks must skip
+  /// these, otherwise an offline node reads as a field that is critically
+  /// deficient in N, P, K, moisture, temperature, humidity and pH all at
+  /// once. Only the keys [defaultAlertRules] reads are considered.
+  bool get isEmpty =>
+      n == 0 &&
+      p == 0 &&
+      k == 0 &&
+      pH == 0 &&
+      airTemp == 0 &&
+      airHumidity == 0 &&
+      soilMoisturePercent == 0 &&
+      soilTemp == 0 &&
+      ec == 0;
 }
 
 enum MoistureStatus { optimal, low, dry }

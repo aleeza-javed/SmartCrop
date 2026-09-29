@@ -1,12 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:image_picker/image_picker.dart';
-import 'dart:io';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../theme/app_colors.dart';
 import '../services/auth_service.dart';
 import 'edit_profile_screen.dart';
-import 'notifications_screen.dart';
 import 'my_fields_screen.dart';
 import 'connected_sensors_screen.dart';
 import 'field_location_screen.dart';
@@ -21,8 +18,6 @@ class ProfileScreen extends StatefulWidget {
 }
 
 class _ProfileScreenState extends State<ProfileScreen> {
-  XFile? _profileImage;
-  final ImagePicker _imagePicker = ImagePicker();
   final AuthService _authService = AuthService();
 
   Future<void> _logout() async {
@@ -33,34 +28,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
         MaterialPageRoute(builder: (_) => const LoginScreen()),
         (route) => false,
       );
-    }
-  }
-
-  Future<void> _pickProfileImage() async {
-    try {
-      final pickedFile = await _imagePicker.pickImage(
-        source: ImageSource.gallery,
-        imageQuality: 80,
-      );
-      if (pickedFile != null) {
-        setState(() {
-          _profileImage = pickedFile;
-        });
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Profile picture updated'),
-              duration: Duration(seconds: 2),
-            ),
-          );
-        }
-      }
-    } catch (e) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error picking image: $e')),
-        );
-      }
     }
   }
 
@@ -77,81 +44,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
           Center(
             child: Column(
               children: [
-                // Profile Avatar
-                Container(
-                  width: 96,
-                  height: 96,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    border: Border.all(
-                      color: const Color(0xFFB9F474),
-                      width: 4,
-                    ),
-                  ),
-                  child: Stack(
-                    children: [
-                      Container(
-                        decoration: const BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: Color(0xFFECEFEA),
-                        ),
-                        child: ClipOval(
-                          child: _profileImage != null
-                              ? Image.file(
-                                  File(_profileImage!.path),
-                                  fit: BoxFit.cover,
-                                )
-                              : Image.network(
-                                  'https://lh3.googleusercontent.com/aida-public/AB6AXuC0xuPpRW9QYwGaY8ZNsHfMk6fgujlwf5Ph7fSL-gCB633ccbVVoDy1bKpv5Ny40yKA_9OHQSrDxcW6MCIGWLOoIvJQ9Rv9HHp8DZN2G6VB5QB1OODUksuce5frO0nMEJbCprn7Xr5iZjiO81wnlQZqLx66XlohQpEHpwLehLFTwW0vqZkyVM2Sc1xKD6obZyV8nt7PbD4_qoDpyYavyNdSeRZFZAnSE7eo4xpJr7M0W1E9n-UVQJDVJ-GKoHzEUC9gIydbgTQh2LdZ',
-                                  fit: BoxFit.cover,
-                                  errorBuilder:
-                                      (context, error, stackTrace) =>
-                                          Container(
-                                    color: Colors.grey[300],
-                                    child: const Icon(Icons.person),
-                                  ),
-                                ),
-                        ),
-                      ),
-
-                      // Camera button
-                      Positioned(
-                        bottom: 0,
-                        right: 0,
-                        child: GestureDetector(
-                          onTap: _pickProfileImage,
-                          child: Container(
-                            width: 32,
-                            height: 32,
-                            decoration: BoxDecoration(
-                              color: AppColors.primary,
-                              shape: BoxShape.circle,
-                              border: Border.all(
-                                color: Colors.white,
-                                width: 2,
-                              ),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: Colors.black.withValues(alpha: 0.1),
-                                  blurRadius: 4,
-                                  offset: const Offset(0, 2),
-                                ),
-                              ],
-                            ),
-                            child: const Icon(
-                              Icons.photo_camera,
-                              color: Colors.white,
-                              size: 16,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-
-                const SizedBox(height: 16),
-
                 // Name and Email
                 Text(
                   FirebaseAuth.instance.currentUser?.displayName ?? 'User',
@@ -249,7 +141,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
                 const SizedBox(height: 12),
 
-                // ── NEW: Field Location ──
                 _SettingCard(
                   icon: Icons.location_on_rounded,
                   iconColor: AppColors.primary,
@@ -259,20 +150,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     context,
                     MaterialPageRoute(
                       builder: (_) => const FieldLocationScreen(),
-                    ),
-                  ),
-                ),
-
-                const SizedBox(height: 12),
-
-                _SettingCard(
-                  icon: Icons.notifications_rounded,
-                  iconColor: AppColors.primary,
-                  title: 'Notifications',
-                  onTap: () => Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => const NotificationsScreen(),
                     ),
                   ),
                 ),

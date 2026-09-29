@@ -5,6 +5,10 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../models/sensor_data.dart';
 import '../services/active_crop_service.dart';
+import '../services/alert_monitor_service.dart';
+import '../services/crop_threshold_service.dart';
+import '../services/notification_history_service.dart';
+import '../services/notification_service.dart';
 import '../services/sensor_service.dart';
 import '../theme/app_colors.dart';
 import 'sensors_screen.dart';
@@ -97,6 +101,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
   StreamSubscription<SensorData>? _subscription;
   String _activeCrop = 'wheat';
 
+  // Raises a system notification whenever a reading crosses a threshold
+  // band. Lives on this screen because it is the one place already holding
+  // the live sensor stream, so alerts run for every tab from one place.
+  final AlertMonitorService _alertMonitor = AlertMonitorService();
+  final CropThresholdService _thresholds = CropThresholdService();
+
   @override
   void initState() {
     super.initState();
@@ -104,9 +114,25 @@ class _DashboardScreenState extends State<DashboardScreen> {
       statusBarColor: Colors.transparent,
       statusBarIconBrightness: Brightness.dark,
     ));
-    _loadActiveCrop();
+    _init();
+  }
+
+  /// Thresholds are resolved before the sensor stream starts, so the very
+  /// first reading is already compared against the active crop's real bands
+  /// rather than the generic fallback.
+  Future<void> _init() async {
+    await _loadActiveCrop();
+    await _loadThresholds();
+    // Seed the badge from storage so a relaunch shows the right count before
+    // any new alert fires.
+    await NotificationHistoryService.instance.refreshUnreadCount();
+    if (!mounted) return;
     _subscription = _sensorService.sensorDataStream().listen((data) {
-      if (mounted) setState(() => _sensorData = data);
+      if (mounted) {
+        setState(() => _sensorData = data);
+        _sensorService.recordReading(data, crop: _activeCrop);
+      }
+      _checkThresholds(data);
     });
   }
 
@@ -115,9 +141,28 @@ class _DashboardScreenState extends State<DashboardScreen> {
     if (mounted) setState(() => _activeCrop = crop);
   }
 
+  /// Installs the active crop's bands, taken from the backend
+  /// `fertillizer Alerts/crop_thresholds.py` via `GET /monitor/config`.
+  Future<void> _loadThresholds({bool forceRefresh = false}) async {
+    await _thresholds.load(forceRefresh: forceRefresh);
+    if (!mounted) return;
+    _alertMonitor.setRules(_thresholds.rulesForOrFallback(_activeCrop));
+  }
+
   Future<void> _setActiveCrop(String crop) async {
     await ActiveCropService.setActiveCrop(crop);
     if (mounted) setState(() => _activeCrop = crop);
+    // Bands are crop-specific, so a crop change needs its own table and a
+    // fresh baseline.
+    await _loadThresholds();
+  }
+
+  void _checkThresholds(SensorData data) {
+    final events = _alertMonitor.evaluate(data);
+    if (events.isEmpty) return;
+    // Crop comes from here because AlertEvent cannot carry it; it is prefixed
+    // onto the notification title and stored on the history record.
+    NotificationService.instance.showAll(events, crop: _activeCrop);
   }
 
   @override
@@ -137,7 +182,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       backgroundColor: AppColors.background,
       body: Column(
         children: [
-_TopBar(topPad: topPad, sensorData: _sensorData, crop: _activeCrop),
+              _TopBar(topPad: topPad),
               Expanded(
                 child: switch (_selectedTab) {
 0 => _HomeTab(
@@ -318,13 +363,73 @@ const SizedBox(height: 28),
   }
 }
 
+// ─── Notification Bell ─────────────────────────────────────────────────────────
+
+/// Bell with a live unread badge driven by
+/// `NotificationHistoryService.unreadCount`, so it updates the moment an alert
+/// is recorded without any setState plumbing in the dashboard.
+///
+/// Opens the full history, then marks everything read on the way back, since
+/// the user has just seen the whole list.
+class _NotificationBell extends StatelessWidget {
+  const _NotificationBell();
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: () async {
+        await Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const NotificationsScreen()),
+        );
+        await NotificationHistoryService.instance.markAllRead();
+      },
+      child: ValueListenableBuilder<int>(
+        valueListenable: NotificationHistoryService.instance.unreadCount,
+        builder: (context, unread, _) {
+          return Stack(
+            clipBehavior: Clip.none,
+            children: [
+              Icon(Icons.notifications_outlined,
+                  size: 26, color: AppColors.onBackground),
+              if (unread > 0)
+                Positioned(
+                  right: -5,
+                  top: -5,
+                  child: Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                    constraints: const BoxConstraints(minWidth: 17),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFBA1A1A),
+                      borderRadius: BorderRadius.circular(999),
+                      border: Border.all(color: Colors.white, width: 1.5),
+                    ),
+                    child: Text(
+                      unread > 99 ? '99+' : '$unread',
+                      textAlign: TextAlign.center,
+                      style: GoogleFonts.manrope(
+                        fontSize: 9,
+                        fontWeight: FontWeight.w700,
+                        color: Colors.white,
+                        height: 1.2,
+                      ),
+                    ),
+                  ),
+                ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
 // ─── Top Bar ─────────────────────────────────────────────────────────────────
 
 class _TopBar extends StatelessWidget {
   final double topPad;
-  final SensorData? sensorData;
-  final String crop;
-  const _TopBar({required this.topPad, required this.sensorData, required this.crop});
+  const _TopBar({required this.topPad});
 
   @override
   Widget build(BuildContext context) {
@@ -356,36 +461,7 @@ class _TopBar extends StatelessWidget {
             ),
           ),
           const Spacer(),
-          GestureDetector(
-            onTap: () => Navigator.push(
-              context,
-              MaterialPageRoute(
-                builder: (_) => NotificationsScreen(
-                  sensorData: sensorData,
-                  crop: crop,
-                ),
-              ),
-            ),
-            child: Stack(
-              children: [
-                Icon(Icons.notifications_outlined,
-                    size: 26, color: AppColors.onBackground),
-                Positioned(
-                  right: 1,
-                  top: 1,
-                  child: Container(
-                    width: 8,
-                    height: 8,
-                    decoration: BoxDecoration(
-                      color: const Color(0xFFBA1A1A),
-                      shape: BoxShape.circle,
-                      border: Border.all(color: Colors.white, width: 1.5),
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
+          const _NotificationBell(),
         ],
       ),
     );
