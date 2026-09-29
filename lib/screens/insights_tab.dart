@@ -1,15 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
+import '../models/crop_stage.dart';
 import '../models/sensor_data.dart';
 import '../models/weather_model.dart';
 import '../services/crop_api_service.dart';
+import '../services/crop_tracking_service.dart';
 import '../services/weather_service.dart';
 import '../services/location_service.dart';
 import '../theme/app_colors.dart';
 
 import 'ai_crop_screen.dart';
 import 'fertilizer_screen.dart';
+import 'growth_stage_screen.dart';
 import 'irrigation_screen.dart';
 
 class InsightsTab extends StatefulWidget {
@@ -36,6 +39,17 @@ class _InsightsTabState extends State<InsightsTab> {
 
   FieldLocation? _fieldLocation;
 
+  // Growth Stage Tracker badge state, driven by CropTrackingService.
+  String _growthStageBadge = 'Set sowing date';
+  bool _growthHasStage = false;
+
+  static const _badgeNoDate = 'Set sowing date';
+
+  /// Badge text for a crop with no saved anchor date. Follows the crop's own
+  /// anchor, so a transplanting crop says "Set transplanting date".
+  String _noDateBadge(CropProfile profile) => profile.noDateLabel;
+  static const _badgeCheckHarvest = 'Check harvest';
+
   @override
   void initState() {
     super.initState();
@@ -43,7 +57,96 @@ class _InsightsTabState extends State<InsightsTab> {
     _loadFieldLocation();
     _fetchAlertCount();
     _fetchWeather();
+    _loadGrowthBadge();
   }
+
+  /// Reads the saved anchor date for the active crop and derives the badge.
+  ///
+  /// Four shapes:
+  ///  * month-based perennial - the current calendar stage, no date needed;
+  ///  * days-after-anchor, inside the calendar - "Stage · Day N", or the stage
+  ///    name alone for calendar-mode crops;
+  ///  * days-after-anchor past the last stage - "Check harvest", or the
+  ///    multi-cut badge for a crop that is cut early and regrows;
+  ///  * no date, or a crop with no profile - "Set sowing date".
+  ///
+  /// For a two-season crop the season is read from storage, falling back to
+  /// the season suggested by the date itself, so the badge never disagrees
+  /// with the stage screen.
+  Future<void> _loadGrowthBadge() async {
+    final profile = profileFor(widget.crop);
+    final today = DateTime.now();
+
+    if (profile == null) {
+      _setBadge(_badgeNoDate, live: false);
+      return;
+    }
+    final noDate = _noDateBadge(profile);
+
+    if (profile.isMonthBased) {
+      final stage = profile.monthStageFor(today.month);
+      _setBadge(stage?.name ?? _badgeCheckHarvest, live: stage != null);
+      return;
+    }
+
+    final results = await Future.wait([
+      CropTrackingService.instance.getSowingDate(widget.crop),
+      CropTrackingService.instance.getSeasonVariant(widget.crop),
+    ]);
+    if (!mounted) return;
+
+    final date = results[0] as DateTime?;
+    final storedVariant = results[1] as String?;
+
+    // Fall back to the season the date implies when the user has not chosen.
+    final variant = storedVariant ??
+        (date == null ? null : profile.suggestedVariantForDate(date)?.name);
+
+    final day = date == null
+        ? null
+        : DateTime(today.year, today.month, today.day)
+            .difference(DateTime(date.year, date.month, date.day))
+            .inDays;
+
+    if (day == null) {
+      _setBadge(noDate, live: false);
+      return;
+    }
+    if (profile.isPastLastStage(day, variantName: variant)) {
+      // A cut-and-regrow crop is not waiting to be harvested, so it gets its
+      // own badge rather than the harvest prompt.
+      _setBadge(
+        profile.isMultiCut(variantName: variant)
+            ? profile.pastFirstBadge
+            : _badgeCheckHarvest,
+        live: false,
+      );
+      return;
+    }
+
+    final stage = profile.stageForDay(day, variantName: variant);
+    if (stage == null) {
+      _setBadge(noDate, live: false);
+      return;
+    }
+    _setBadge(
+      profile.calendarMode ? stage.name : '${stage.name} · Day $day',
+      live: true,
+    );
+  }
+
+  void _setBadge(String text, {required bool live}) {
+    if (!mounted) return;
+    setState(() {
+      _growthStageBadge = text;
+      _growthHasStage = live;
+    });
+  }
+
+  /// Teal while a stage is live, so the badge reads as "tracking", not
+  /// "needs setup".
+  Color get _growthBadgeColour =>
+      _growthHasStage ? const Color(0xFF00695C) : AppColors.primary;
 
   Future<void> _loadFieldLocation() async {
     final location =
@@ -115,8 +218,10 @@ class _InsightsTabState extends State<InsightsTab> {
         });
       }
 
-      final weather =
-          await WeatherService.getWeather();
+      final weather = await WeatherService.getWeather(
+        latitude: location?.latitude,
+        longitude: location?.longitude,
+      );
 
       if (!mounted) return;
 
@@ -279,6 +384,35 @@ class _InsightsTabState extends State<InsightsTab> {
             ),
           ),
 
+          const SizedBox(height: 14),
+
+          // ─────────────────────────────────────────────
+          // GROWTH STAGE TRACKER
+          // ─────────────────────────────────────────────
+
+          _InsightEntryCard(
+            title: 'Growth Stage Tracker',
+            subtitle:
+                'Follow your crop from sowing to harvest',
+            icon: Icons.timeline_rounded,
+            iconBg: const Color(0xFF00695C),
+            badge: _growthStageBadge,
+            badgeColor: _growthBadgeColour,
+            onTap: () async {
+              await Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => GrowthStageScreen(
+                    crop: widget.crop,
+                    sensorData: widget.sensorData,
+                  ),
+                ),
+              );
+              // The date may have been set or cleared on that screen.
+              await _loadGrowthBadge();
+            },
+          ),
+
           const SizedBox(height: 32),
 
           // ─────────────────────────────────────────────
@@ -301,15 +435,6 @@ class _InsightsTabState extends State<InsightsTab> {
             title: 'Pest & Disease Predictor',
             subtitle:
                 'Early warning system trained on regional outbreak data',
-          ),
-
-          const SizedBox(height: 10),
-
-          _ComingSoonCard(
-            icon: Icons.trending_up_rounded,
-            title: 'Yield Forecaster',
-            subtitle:
-                'Predict expected yield based on current field conditions',
           ),
         ],
       ),
