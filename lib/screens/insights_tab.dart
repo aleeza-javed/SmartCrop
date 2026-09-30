@@ -159,6 +159,13 @@ class _InsightsTabState extends State<InsightsTab> {
     });
   }
 
+  /// Badge count for the Fertilizer Advisor card.
+  ///
+  /// Reads `summary.required_count` from the fertilizer endpoint rather than
+  /// counting `/monitor` alerts, so the badge and the screen it opens can never
+  /// disagree: the badge is literally the number of nutrients that screen will
+  /// offer advice for. Nutrients with no reading are excluded by the backend,
+  /// because "sensor not reporting" is not an action item.
   Future<void> _fetchAlertCount() async {
     final data = widget.sensorData;
 
@@ -169,26 +176,16 @@ class _InsightsTabState extends State<InsightsTab> {
     });
 
     try {
-      final current = {
-        'N': data.n,
-        'P': data.p,
-        'K': data.k,
-        'temperature': data.airTemp,
-        'humidity': data.airHumidity,
-        'ph': data.pH,
-        'soil_moisture': data.soilMoisturePercent,
-      };
-
-      final result =
-          await CropApiService.getMonitoringAlerts(
+      final report = await CropApiService.getFertilizerReport(
         crop: widget.crop,
-        current: current,
+        npk: {'N': data.n, 'P': data.p, 'K': data.k},
+        current: data.toMonitorValues(),
       );
 
       if (!mounted) return;
 
       setState(() {
-        _alertCount = result.alerts.length;
+        _alertCount = report.summary.requiredCount;
         _loadingAlerts = false;
       });
     } catch (_) {
@@ -342,12 +339,14 @@ class _InsightsTabState extends State<InsightsTab> {
           _InsightEntryCard(
             title: 'Fertilizer Advisor',
             subtitle:
-                'Get AI suggestions when soil nutrients are off-balance',
+                'Get fertilizer advice when soil nutrients are out of range',
             icon: Icons.science_rounded,
             iconBg: const Color(0xFF6A1B9A),
             badge: _loadingAlerts
                 ? '...'
-                : '$_alertCount Alert${_alertCount != 1 ? 's' : ''}',
+                // Verb agreement flips at 1 ("1 Needs action" / "2 Need
+                // action"), the inverse of the usual plural pattern.
+                : '$_alertCount ${_alertCount == 1 ? 'Needs' : 'Need'} action',
             badgeColor: _alertCount > 0
                 ? const Color(0xFF856404)
                 : AppColors.primary,

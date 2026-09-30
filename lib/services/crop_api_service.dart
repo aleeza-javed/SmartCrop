@@ -28,34 +28,301 @@ class CropPrediction {
   }
 }
 
-class FertilizerRecommendation {
-  final String status;
-  final double current;
-  final List<double> optimalRange;
-  final String advice;
-  final double? deficit;
-  final double? surplus;
+/// Severity vocabulary shared with the monitoring engine, so the Fertilizer
+/// Advisor cannot disagree with the Sensors tab or a notification rule.
+enum FertilizerStatus {
+  normal,
+  warning,
+  critical,
+  noReading,
 
-  const FertilizerRecommendation({
-    required this.status,
-    required this.current,
-    required this.optimalRange,
-    required this.advice,
-    this.deficit,
-    this.surplus,
+  /// A status this client does not know about. Treated as "not actionable"
+  /// rather than crashing or guessing, so a newer backend degrades quietly.
+  unknown;
+
+  static FertilizerStatus parse(String? raw) {
+    switch (raw) {
+      case 'NORMAL':
+        return FertilizerStatus.normal;
+      case 'WARNING':
+        return FertilizerStatus.warning;
+      case 'CRITICAL':
+        return FertilizerStatus.critical;
+      case 'NO_READING':
+        return FertilizerStatus.noReading;
+      default:
+        return FertilizerStatus.unknown;
+    }
+  }
+}
+
+/// A fertilizer product class for a confirmed deficiency.
+class FertilizerProduct {
+  final String? fertilizer;
+  final String? name;
+  final String? role;
+  final double? nutrientFraction;
+
+  const FertilizerProduct({
+    this.fertilizer,
+    this.name,
+    this.role,
+    this.nutrientFraction,
   });
 
-  factory FertilizerRecommendation.fromJson(Map<String, dynamic> json) {
+  factory FertilizerProduct.fromJson(Map<String, dynamic> json) {
+    return FertilizerProduct(
+      fertilizer: json['fertilizer'] as String?,
+      name: json['name'] as String?,
+      role: json['role'] as String?,
+      nutrientFraction: (json['nutrient_fraction'] as num?)?.toDouble(),
+    );
+  }
+}
+
+/// Per-nutrient advice from `POST /fertilizer`.
+///
+/// Every field except [status] and [advice] is nullable by design: a nutrient
+/// with no reading has no `current`, no `gap` and no `required` answer, and
+/// that is different from `required: false`.
+class FertilizerRecommendation {
+  final String parameter;
+  final String label;
+  final String unit;
+  final List<double> band;
+  final double? buffer;
+  final double? current;
+  final FertilizerStatus status;
+
+  /// null only when [status] is [FertilizerStatus.noReading] - "we do not know"
+  /// is not the same answer as "not required".
+  final bool? required;
+  final String? direction;
+  final double? gap;
+
+  /// Estimated nutrient mass to close the gap, kg/ha. Rule of thumb only.
+  final double? nutrientKgHa;
+
+  /// Estimated product mass to close the gap, kg/ha. Rule of thumb only.
+  final double? productKgHa;
+  final FertilizerProduct? product;
+  final String advice;
+
+  /// `instant` or `persistent`.
+  final String confidence;
+
+  /// The monitoring engine's persistence level, or `unavailable` when the
+  /// client could not supply enough history to judge it.
+  final String persistence;
+
+  const FertilizerRecommendation({
+    required this.parameter,
+    required this.label,
+    required this.unit,
+    required this.band,
+    this.buffer,
+    this.current,
+    required this.status,
+    this.required,
+    this.direction,
+    this.gap,
+    this.nutrientKgHa,
+    this.productKgHa,
+    this.product,
+    required this.advice,
+    required this.confidence,
+    required this.persistence,
+  });
+
+  factory FertilizerRecommendation.fromJson(
+    String parameter,
+    Map<String, dynamic> json,
+  ) {
+    final rawProduct = json['product'];
     return FertilizerRecommendation(
-      status: json['status'] as String? ?? '',
-      current: (json['current'] as num?)?.toDouble() ?? 0.0,
-      optimalRange: (json['optimal_range'] as List<dynamic>?)
-              ?.map((e) => (e as num).toDouble())
+      parameter: json['parameter'] as String? ?? parameter,
+      label: json['label'] as String? ?? parameter,
+      unit: json['unit'] as String? ?? '',
+      band: (json['band'] as List<dynamic>?)
+              ?.map((e) => (e as num?)?.toDouble() ?? 0)
               .toList() ??
-          [],
+          const [],
+      buffer: (json['buffer'] as num?)?.toDouble(),
+      current: (json['current'] as num?)?.toDouble(),
+      status: FertilizerStatus.parse(json['status'] as String?),
+      required: json['required'] as bool?,
+      direction: json['direction'] as String?,
+      gap: (json['gap'] as num?)?.toDouble(),
+      nutrientKgHa: (json['nutrient_kg_ha'] as num?)?.toDouble(),
+      productKgHa: (json['product_kg_ha'] as num?)?.toDouble(),
+      product: rawProduct is Map
+          ? FertilizerProduct.fromJson(Map<String, dynamic>.from(rawProduct))
+          : null,
       advice: json['advice'] as String? ?? '',
-      deficit: (json['deficit'] as num?)?.toDouble(),
-      surplus: (json['surplus'] as num?)?.toDouble(),
+      confidence: json['confidence'] as String? ?? 'instant',
+      persistence: json['persistence'] as String? ?? 'unavailable',
+    );
+  }
+
+  bool get isNoReading => status == FertilizerStatus.noReading;
+  bool get isDeficient => direction == 'deficient';
+  bool get isExcess => direction == 'excess';
+  bool get isWithinRange => status == FertilizerStatus.normal;
+  bool get needsAction => required ?? false;
+
+  /// True when the backend had enough history to judge persistence. When false
+  /// the UI must not present confidence as anything but an instantaneous read.
+  bool get confidenceKnown => persistence != 'unavailable';
+
+  /// An amount is only ever offered for a confirmed deficiency.
+  bool get hasEstimate => isDeficient && productKgHa != null && product != null;
+}
+
+class FertilizerHealth {
+  final int score;
+  final int scoreOutOf;
+  final String status;
+
+  /// True when some nutrient had no reading, so the score covers fewer than
+  /// all three nutrients and is not comparable to a full evaluation.
+  final bool partial;
+  final List<String> evaluated;
+  final String label;
+  final String note;
+
+  const FertilizerHealth({
+    required this.score,
+    required this.scoreOutOf,
+    required this.status,
+    required this.partial,
+    required this.evaluated,
+    required this.label,
+    required this.note,
+  });
+
+  factory FertilizerHealth.fromJson(Map<String, dynamic> json) {
+    return FertilizerHealth(
+      score: (json['score'] as num?)?.toInt() ?? 0,
+      scoreOutOf: (json['score_out_of'] as num?)?.toInt() ?? 100,
+      status: json['status'] as String? ?? 'NO_READING',
+      partial: json['partial'] as bool? ?? false,
+      evaluated: (json['evaluated'] as List<dynamic>?)
+              ?.map((e) => e as String)
+              .toList() ??
+          const [],
+      label: json['label'] as String? ?? '',
+      note: json['note'] as String? ?? '',
+    );
+  }
+
+  /// 0..1 for a progress bar, clamped so a malformed score cannot overflow.
+  double get fraction {
+    if (scoreOutOf <= 0) return 0;
+    final raw = score / scoreOutOf;
+    if (raw.isNaN) return 0;
+    return raw.clamp(0.0, 1.0);
+  }
+}
+
+class FertilizerSummary {
+  final int requiredCount;
+  final List<String> withinRange;
+
+  /// Nutrients with no usable reading. These are never counted as required.
+  final List<String> noReading;
+
+  const FertilizerSummary({
+    required this.requiredCount,
+    required this.withinRange,
+    required this.noReading,
+  });
+
+  factory FertilizerSummary.fromJson(Map<String, dynamic> json) {
+    List<String> strings(String key) =>
+        (json[key] as List<dynamic>?)?.map((e) => e as String).toList() ??
+        const [];
+    return FertilizerSummary(
+      requiredCount: (json['required_count'] as num?)?.toInt() ?? 0,
+      withinRange: strings('within_range'),
+      noReading: strings('no_reading'),
+    );
+  }
+}
+
+/// The whole `POST /fertilizer` response.
+class FertilizerReport {
+  final String crop;
+  final bool stale;
+  final double? readingAgeSeconds;
+  final int staleAfterSeconds;
+  final FertilizerHealth health;
+  final FertilizerSummary summary;
+
+  /// Keyed by nutrient symbol.
+  final Map<String, FertilizerRecommendation> nutrients;
+
+  /// N, P, K in server order, so the UI renders them consistently.
+  final List<String> order;
+
+  const FertilizerReport({
+    required this.crop,
+    required this.stale,
+    required this.readingAgeSeconds,
+    required this.staleAfterSeconds,
+    required this.health,
+    required this.summary,
+    required this.nutrients,
+    required this.order,
+  });
+
+  factory FertilizerReport.fromJson(Map<String, dynamic> json) {
+    final rawNutrients = json['nutrients'];
+    final nutrients = <String, FertilizerRecommendation>{};
+    if (rawNutrients is Map) {
+      rawNutrients.forEach((key, value) {
+        if (value is! Map) return;
+        nutrients['$key'] = FertilizerRecommendation.fromJson(
+          '$key',
+          Map<String, dynamic>.from(value),
+        );
+      });
+    }
+
+    // Prefer the server's order, then top up with any remaining keys.
+    const preferred = ['N', 'P', 'K'];
+    final order = <String>[
+      for (final key in preferred)
+        if (nutrients.containsKey(key)) key,
+      ...nutrients.keys.where((k) => !preferred.contains(k)),
+    ];
+
+    return FertilizerReport(
+      crop: json['crop'] as String? ?? '',
+      stale: json['stale'] as bool? ?? false,
+      readingAgeSeconds: (json['reading_age_seconds'] as num?)?.toDouble(),
+      staleAfterSeconds: (json['stale_after_seconds'] as num?)?.toInt() ?? 0,
+      health: json['health'] is Map
+          ? FertilizerHealth.fromJson(
+              Map<String, dynamic>.from(json['health'] as Map))
+          : const FertilizerHealth(
+              score: 0,
+              scoreOutOf: 100,
+              status: 'NO_READING',
+              partial: true,
+              evaluated: [],
+              label: '',
+              note: '',
+            ),
+      summary: json['summary'] is Map
+          ? FertilizerSummary.fromJson(
+              Map<String, dynamic>.from(json['summary'] as Map))
+          : const FertilizerSummary(
+              requiredCount: 0,
+              withinRange: [],
+              noReading: [],
+            ),
+      nutrients: nutrients,
+      order: order,
     );
   }
 }
@@ -173,33 +440,53 @@ class CropApiService {
     }
   }
 
-  static Future<Map<String, FertilizerRecommendation>> getFertilizerRecommendations({
+  /// Rule-based fertilizer advice for the current N/P/K readings.
+  ///
+  /// [current] carries the full monitored parameter set so the backend can judge
+  /// whether an off-range reading has *persisted*; without it the backend
+  /// answers `persistence: "unavailable"` and the advice is instantaneous only.
+  /// [history] is the archived readings, oldest first, in the backend's
+  /// `toMonitorPayload()` shape. [readingAt] is when the client observed the
+  /// reading, used only to compute the staleness flag.
+  static Future<FertilizerReport> getFertilizerReport({
     required String crop,
-    required double n,
-    required double p,
-    required double k,
+    required Map<String, double> npk,
+    Map<String, double>? current,
+    List<Map<String, dynamic>>? history,
+    DateTime? readingAt,
   }) async {
+    final body = <String, dynamic>{
+      'crop': crop,
+      ...npk,
+      if (current != null && current.isNotEmpty) 'current': current,
+      if (history != null && history.isNotEmpty) 'history': history,
+      if (readingAt != null) 'timestamp': readingAt.toUtc().toIso8601String(),
+    };
+
     final response = await http.post(
       Uri.parse('$baseUrl/fertilizer'),
       headers: {'Content-Type': 'application/json'},
-      body: json.encode({
-        'crop': crop,
-        'N': n,
-        'P': p,
-        'K': k,
-      }),
-    );
+      body: json.encode(body),
+    ).timeout(const Duration(seconds: 10));
 
     if (response.statusCode == 200) {
-      final data = json.decode(response.body);
-      final recs = data['recommendations'] as Map<String, dynamic>? ?? {};
-      return {
-        for (final entry in recs.entries)
-          entry.key: FertilizerRecommendation.fromJson(entry.value as Map<String, dynamic>)
-      };
-    } else {
-      throw Exception('Failed to fetch fertilizer recommendations: ${response.statusCode}');
+      final decoded = json.decode(response.body);
+      if (decoded is! Map) {
+        throw const CropApiException('Malformed fertilizer response.');
+      }
+      return FertilizerReport.fromJson(Map<String, dynamic>.from(decoded));
     }
+
+    String message = 'Fertilizer advice unavailable (server ${response.statusCode}).';
+    try {
+      final decoded = json.decode(response.body);
+      if (decoded is Map && decoded['error'] is String) {
+        message = decoded['error'] as String;
+      }
+    } catch (_) {
+      // Keep the generic message; the body was not JSON.
+    }
+    throw CropApiException(message, statusCode: response.statusCode);
   }
 
   static Future<MonitoringResult> getMonitoringAlerts({

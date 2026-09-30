@@ -1,6 +1,7 @@
 import os
 import sys
 import datetime
+import math
 import numpy as np
 import pandas as pd
 import joblib
@@ -12,8 +13,11 @@ ALERTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fertilliz
 if ALERTS_DIR not in sys.path:
     sys.path.insert(0, ALERTS_DIR)
 
-from crop_thresholds import CROP_THRESHOLDS, MONITOR_CONFIG, available_crops, get_thresholds, config_for_crop
-from monitoring_engine import (analyze_monitoring, classify_reading, UnknownCropError,
+from crop_thresholds import (CROP_THRESHOLDS, MONITOR_CONFIG, PPM_TO_KG_HA,
+                             available_crops, get_thresholds, get_product,
+                             config_for_crop)
+from monitoring_engine import (analyze_monitoring, classify_reading,
+                                compute_health_score, UnknownCropError,
                                 InvalidReadingError)
 
 app = Flask(__name__)
@@ -48,38 +52,151 @@ print("Classes:", getattr(model, "classes_", None))
 # ── Config ─────────────────────────────────────────────────────────
 FEATURES = ["N", "P", "K", "temperature", "humidity", "ph", "rainfall"]
 
-OPTIMAL_NPK = {
-  "apple": {"N": {"mean": 20.8, "std": 11.9}, "P": {"mean": 134.2, "std": 8.1}, "K": {"mean": 199.9, "std": 3.3}},
-  "banana": {"N": {"mean": 100.2, "std": 11.1}, "P": {"mean": 82.0, "std": 7.7}, "K": {"mean": 50.0, "std": 3.4}},
-  "blackgram": {"N": {"mean": 40.0, "std": 12.7}, "P": {"mean": 67.5, "std": 7.2}, "K": {"mean": 19.2, "std": 3.2}},
-  "chickpea": {"N": {"mean": 40.1, "std": 12.2}, "P": {"mean": 67.8, "std": 7.5}, "K": {"mean": 79.9, "std": 3.3}},
-  "coconut": {"N": {"mean": 22.0, "std": 11.8}, "P": {"mean": 16.9, "std": 8.4}, "K": {"mean": 30.6, "std": 3.0}},
-  "coffee": {"N": {"mean": 101.2, "std": 12.3}, "P": {"mean": 28.7, "std": 7.3}, "K": {"mean": 29.9, "std": 3.2}},
-  "cotton": {"N": {"mean": 117.8, "std": 11.6}, "P": {"mean": 46.2, "std": 7.3}, "K": {"mean": 19.6, "std": 3.2}},
-  "grapes": {"N": {"mean": 23.2, "std": 12.5}, "P": {"mean": 132.5, "std": 7.6}, "K": {"mean": 200.1, "std": 3.3}},
-  "jute": {"N": {"mean": 78.4, "std": 11.0}, "P": {"mean": 46.9, "std": 7.2}, "K": {"mean": 40.0, "std": 3.3}},
-  "kidneybeans": {"N": {"mean": 20.8, "std": 10.8}, "P": {"mean": 67.5, "std": 7.6}, "K": {"mean": 20.0, "std": 3.1}},
-  "lentil": {"N": {"mean": 18.8, "std": 12.2}, "P": {"mean": 68.4, "std": 7.3}, "K": {"mean": 19.4, "std": 3.0}},
-  "maize": {"N": {"mean": 77.8, "std": 11.9}, "P": {"mean": 48.4, "std": 8.0}, "K": {"mean": 19.8, "std": 2.9}},
-  "mango": {"N": {"mean": 20.1, "std": 12.3}, "P": {"mean": 27.2, "std": 7.7}, "K": {"mean": 29.9, "std": 3.1}},
-  "mothbeans": {"N": {"mean": 21.4, "std": 11.3}, "P": {"mean": 48.0, "std": 7.5}, "K": {"mean": 20.2, "std": 3.0}},
-  "mungbean": {"N": {"mean": 21.0, "std": 11.5}, "P": {"mean": 47.3, "std": 7.9}, "K": {"mean": 19.9, "std": 3.1}},
-  "muskmelon": {"N": {"mean": 100.3, "std": 12.2}, "P": {"mean": 17.7, "std": 7.2}, "K": {"mean": 50.1, "std": 3.2}},
-  "mustard": {"N": {"mean": 81.5, "std": 12.3}, "P": {"mean": 45.6, "std": 8.5}, "K": {"mean": 28.9, "std": 6.1}},
-  "onion": {"N": {"mean": 100.3, "std": 11.4}, "P": {"mean": 55.9, "std": 8.5}, "K": {"mean": 81.0, "std": 11.9}},
-  "orange": {"N": {"mean": 19.6, "std": 11.9}, "P": {"mean": 16.6, "std": 7.7}, "K": {"mean": 10.0, "std": 3.1}},
-  "papaya": {"N": {"mean": 49.9, "std": 12.2}, "P": {"mean": 59.0, "std": 7.1}, "K": {"mean": 50.0, "std": 3.1}},
-  "pigeonpeas": {"N": {"mean": 20.7, "std": 11.8}, "P": {"mean": 67.7, "std": 7.3}, "K": {"mean": 20.3, "std": 2.8}},
-  "pomegranate": {"N": {"mean": 18.9, "std": 12.6}, "P": {"mean": 18.8, "std": 7.4}, "K": {"mean": 40.2, "std": 3.0}},
-  "rice": {"N": {"mean": 79.9, "std": 11.9}, "P": {"mean": 47.6, "std": 7.9}, "K": {"mean": 39.9, "std": 2.9}},
-  "sorghum": {"N": {"mean": 80.6, "std": 11.6}, "P": {"mean": 45.1, "std": 8.8}, "K": {"mean": 36.2, "std": 8.8}},
-  "sugarcane": {"N": {"mean": 126.2, "std": 14.8}, "P": {"mean": 53.4, "std": 9.2}, "K": {"mean": 63.8, "std": 9.5}},
-  "sunflower": {"N": {"mean": 97.7, "std": 11.4}, "P": {"mean": 54.6, "std": 9.1}, "K": {"mean": 45.4, "std": 8.9}},
-  "tobacco": {"N": {"mean": 59.2, "std": 10.6}, "P": {"mean": 43.9, "std": 8.7}, "K": {"mean": 100.7, "std": 12.2}},
-  "tomato": {"N": {"mean": 99.7, "std": 11.2}, "P": {"mean": 65.5, "std": 8.9}, "K": {"mean": 98.9, "std": 11.5}},
-  "watermelon": {"N": {"mean": 99.4, "std": 12.6}, "P": {"mean": 17.0, "std": 7.5}, "K": {"mean": 50.2, "std": 3.3}},
-  "wheat": {"N": {"mean": 118.9, "std": 11.8}, "P": {"mean": 61.2, "std": 12.7}, "K": {"mean": 44.6, "std": 9.6}},
-}
+# Nutrients the fertilizer advisor reports on.
+FERTILIZER_NUTRIENTS = ("N", "P", "K")
+
+# A client-supplied reading older than this is reported as stale rather than
+# rejected: a stale reading is still worth showing, but the UI must not present
+# it as live. Overridable for tests / tuning without a code change.
+STALE_AFTER_SECONDS = int(os.environ.get("SMARTCROP_STALE_SECONDS", 600))
+
+# Wording used wherever a nutrient reads inside its configured range.
+WITHIN_RANGE_ADVICE = "{label} is within the configured range."
+NO_READING_ADVICE = "Sensor not reporting"
+
+
+# ── Probe reading guards ────────────────────────────────────────────────────
+# Which readings mean "the probe is dead" depends on the parameter, so the
+# rules are keyed by parameter rather than applied blindly. Getting this
+# backwards is costly in both directions: a false "sensor not reporting" hides
+# a real problem, and a false CRITICAL alert cries wolf.
+
+
+def _canonical_param(name):
+    """Normalise a reading key for the fault-rule lookup.
+
+    Only N, P, K are case-sensitive; every other key is lowercased so 'ph'/'pH'
+    and 'EC'/'ec' resolve to the same rule.
+    """
+    key = str(name)
+    return key if key in ("N", "P", "K") else key.lower()
+
+
+# Parameters where a reading of exactly 0 means the probe is dead rather than
+# "measured zero". A soil nutrient or pH concentration of precisely 0 is not a
+# real reading. Deliberately EXCLUDES soil_moisture, humidity, temperature and
+# EC, all of which have legitimate zero values: 0% soil moisture is bone-dry
+# soil and must raise a normal CRITICAL alert, not a sensor fault.
+ZERO_FAULT_PARAMS = frozenset({"N", "P", "K", "ph"})
+
+# Parameters where a negative value is a malfunction rather than a
+# measurement. Air temperature is explicitly excluded - sub-zero air is normal
+# in many climates and must be accepted. EC is included because conductivity
+# cannot be negative. Any unlisted parameter defaults to "not negative-fault"
+# and is handled by the endpoint's own validation.
+NEGATIVE_FAULT_PARAMS = frozenset({
+    "N", "P", "K", "ph", "ec", "soil_moisture", "soilmoisturepercent",
+    "humidity",
+})
+
+
+def _probe_is_fault(param, value):
+    """True when a probe value means 'not reporting' rather than 'measured X'.
+
+    Always a fault: None and non-finite values.
+    Zero: a fault only for ZERO_FAULT_PARAMS.
+    Negative: a fault only for NEGATIVE_FAULT_PARAMS.
+    Garbage (a non-numeric string, a list, a dict): NOT reported here - this is
+    a client bug, and the endpoint turns it into a 400 so a broken client is
+    never mistaken for a broken sensor.
+    """
+    if value is None:
+        return True
+    if isinstance(value, bool):
+        return False
+
+    numeric = None
+    if isinstance(value, (int, float)):
+        numeric = float(value)
+    elif isinstance(value, str):
+        try:
+            numeric = float(value.strip())
+        except ValueError:
+            return False  # garbage -> let validation return a 400
+    else:
+        return False  # list/dict -> garbage -> 400
+
+    if not math.isfinite(numeric):
+        return True
+
+    key = _canonical_param(param)
+    if numeric == 0 and key in ZERO_FAULT_PARAMS:
+        return True
+    if numeric < 0 and key in NEGATIVE_FAULT_PARAMS:
+        return True
+    return False
+
+
+def _parse_probe(raw, parameter):
+    """Return ``(value, fault)`` for one probe reading.
+
+    ``fault=True``  -> the probe is not reporting; the caller must not classify.
+    ``fault=False`` -> ``value`` is a usable float.
+
+    Raises ValueError for a *malformed request* (garbage that is not a number
+    at all), which the endpoints turn into a 400. The split is deliberate:
+    "the probe is silent" is a sensor condition to report, "you sent nonsense"
+    is a client bug to reject.
+    """
+    if _probe_is_fault(parameter, raw):
+        return None, True
+    if isinstance(raw, bool):
+        raise ValueError(f"Malformed {parameter} value: {raw!r}")
+    try:
+        return float(raw), False
+    except (TypeError, ValueError):
+        raise ValueError(f"Malformed {parameter} value: {raw!r}")
+
+
+def _parse_client_timestamp(raw):
+    """Parse a client-supplied reading timestamp -> aware datetime, or None.
+
+    Accepts ISO 8601 (with or without a trailing Z) and epoch seconds or
+    milliseconds.
+    """
+    if raw is None:
+        return None
+    if isinstance(raw, (int, float)) and not isinstance(raw, bool):
+        seconds = float(raw)
+        if abs(seconds) > 1e11:  # epoch milliseconds
+            seconds /= 1000.0
+        try:
+            return datetime.datetime.fromtimestamp(seconds, tz=datetime.timezone.utc)
+        except (OverflowError, OSError, ValueError):
+            return None
+    try:
+        parsed = datetime.datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+    except (TypeError, ValueError):
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=datetime.timezone.utc)
+    return parsed
+
+
+def _staleness(raw):
+    """Return ``(stale, age_seconds)`` for a client reading timestamp.
+
+    A missing or unparseable timestamp is *not* stale: we simply have nothing
+    to compare against, and inventing an age would be dishonest. Never fails.
+    """
+    parsed = _parse_client_timestamp(raw)
+    if parsed is None:
+        return False, None
+    now = datetime.datetime.now(datetime.timezone.utc)
+    age = (now - parsed).total_seconds()
+    if age < 0:
+        age = 0.0  # clock skew or a reading stamped in the future
+    return age > STALE_AFTER_SECONDS, round(age, 1)
 
 
 # ── Health check ────────────────────────────────────────────────────
@@ -158,14 +275,20 @@ def predict_batch():
 
 
 # ── Feature info ───────────────────────────────────────────────────
+# Description strings only - this endpoint documents the unit the client
+# should send for each feature. It does not affect the model, which is
+# unchanged. N/P/K are described in ppm because that is what the SmartCrop
+# sensor publishes and what the whole app sends; see the unit-provenance note
+# in the /fertilizer docstring before assuming the model's training units
+# match.
 @app.route("/features", methods=["GET"])
 def features():
     return jsonify({
         "features": FEATURES,
         "description": {
-            "N": "Nitrogen content in soil (kg/ha)",
-            "P": "Phosphorus content in soil (kg/ha)",
-            "K": "Potassium content in soil (kg/ha)",
+            "N": "Nitrogen content in soil (ppm)",
+            "P": "Phosphorus content in soil (ppm)",
+            "K": "Potassium content in soil (ppm)",
             "temperature": "Temperature in Celsius",
             "humidity": "Relative humidity (%)",
             "ph": "Soil pH value",
@@ -174,65 +297,282 @@ def features():
     })
 
 
-# ── Fertilizer recommendation ──────────────────────────────────────
+# ── Fertilizer advisor ─────────────────────────────────────────────────────
+# Rule-based, no ML. Every band, buffer and product class comes from
+# crop_thresholds.py via get_thresholds(); severity comes from the same
+# classify_reading() the monitoring engine and the notification rules use, so
+# this screen cannot disagree with the rest of the app.
+#
+# `gap` is the distance from the reading to the nearest configured range edge,
+# in the sensor's own unit (ppm for N/P/K). For a confirmed deficiency the
+# response also carries an ESTIMATED application scale (nutrient_kg_ha /
+# product_kg_ha), derived from the PPM_TO_KG_HA rule of thumb in
+# crop_thresholds.py. That estimate assumes a conventional depth and bulk
+# density that SmartCrop does not measure, so it is advisory scale only - never
+# a prescription, and always worded as "estimated". This mirrors the position
+# taken in monitoring_engine.build_alerts_and_recommendations.
+# UNIT PROVENANCE (read before trusting the numbers)
+# ----------------------------------------------------
+# N/P/K bands are labelled "ppm" because that is what the SmartCrop sensor
+# publishes. But the band *numbers* were derived as mean +/- 1 std of
+# Crop_recommendation_extended.csv, a synthetic dataset whose N/P/K columns are
+# nominally kg/ha. Relabelling the band as ppm converts nothing - it only makes
+# the label match the sensor. Whether the comparison is numerically meaningful
+# therefore depends on an assumption nobody has verified: that the sensor's ppm
+# scale and the training dataset's units are on the same scale. If they are
+# not, every status, gap and estimate below is wrong by that scale factor, and
+# the now-consistent labelling will hide the bug rather than reveal it.
+# Confirm with one soil test against a known-good sample before relying on this.
+
+
 @app.route("/fertilizer", methods=["POST"])
 def fertilizer():
+    """Per-nutrient fertilizer advice for the current N/P/K readings.
+
+    Body: {"crop": str, "N": num, "P": num, "K": num,
+           "current": {...optional extra monitored params...},
+           "history": [...optional, for persistence...],
+           "timestamp": str|num  optional, for the staleness flag}
+    """
     data = request.get_json()
     if not data:
         return jsonify({"error": "No JSON body provided"}), 400
 
-    missing = [f for f in ["crop", "N", "P", "K"] if f not in data]
-    if missing:
-        return jsonify({"error": f"Missing fields: {missing}"}), 400
+    if "crop" not in data:
+        return jsonify({"error": "Missing fields: ['crop']"}), 400
 
-    crop = str(data["crop"]).lower()
-    if crop not in OPTIMAL_NPK:
-        return jsonify({"error": f"Unknown crop '{crop}'. Must be one of: {list(OPTIMAL_NPK.keys())}"}), 400
-
+    crop = str(data["crop"]).lower().strip()
     try:
-        current_n = float(data["N"])
-        current_p = float(data["P"])
-        current_k = float(data["K"])
-    except Exception as e:
+        thresholds = get_thresholds(crop)
+    except KeyError as e:
         return jsonify({"error": str(e)}), 400
 
-    recommendations = {}
-    for nutrient in ["N", "P", "K"]:
-        curr = {"N": current_n, "P": current_p, "K": current_k}[nutrient]
-        opt = OPTIMAL_NPK[crop][nutrient]
-        low = round(opt["mean"] - opt["std"], 1)
-        high = round(opt["mean"] + opt["std"], 1)
+    config = config_for_crop(crop)
+    stale, reading_age_seconds = _staleness(data.get("timestamp"))
 
-        if curr < low:
-            deficit = round(low - curr, 1)
-            recommendations[nutrient] = {
-                "status": "deficient",
-                "current": curr,
-                "optimal_range": [low, high],
-                "deficit": deficit,
-                "advice": f"Add ~{deficit} kg/ha of {nutrient} fertilizer"
-            }
-        elif curr > high:
-            surplus = round(curr - high, 1)
-            recommendations[nutrient] = {
-                "status": "excess",
-                "current": curr,
-                "optimal_range": [low, high],
-                "surplus": surplus,
-                "advice": f"Reduce {nutrient} by ~{surplus} kg/ha. Consider leaching or switching crop"
-            }
+    # ── Parse the three nutrient probes ──
+    # A silent probe is reported as NO_READING, not as a deficiency. Only
+    # genuinely malformed input is a 400.
+    readings, faults = {}, []
+    for nutrient in FERTILIZER_NUTRIENTS:
+        try:
+            value, fault = _parse_probe(data.get(nutrient), nutrient)
+        except ValueError as e:
+            return jsonify({"error": str(e)}), 400
+        if fault:
+            faults.append(nutrient)
         else:
-            recommendations[nutrient] = {
-                "status": "sufficient",
-                "current": curr,
-                "optimal_range": [low, high],
-                "advice": f"{nutrient} level is adequate. No extra needed"
+            readings[nutrient] = value
+
+    monitor_current = dict(readings)
+
+    # ── Optional extra monitored parameters (for persistence) ──
+    # /monitor needs the crop's full configured parameter set before it can
+    # judge whether a condition persisted, so the client may pass the rest of
+    # the reading here. Both shapes are accepted: nested under `current` (the
+    # shape /monitor uses) or flat alongside N/P/K (the shape this endpoint has
+    # always used). `current` wins on conflict. Without these, every nutrient
+    # falls back to confidence="instant".
+    extras = data.get("current")
+    sources = [extras, data] if isinstance(extras, dict) else [data]
+    for param in thresholds:
+        if param in monitor_current:
+            continue
+        for source in sources:
+            if param not in source:
+                continue
+            try:
+                value, fault = _parse_probe(source[param], param)
+            except ValueError as e:
+                return jsonify({"error": str(e)}), 400
+            if not fault:
+                monitor_current[param] = value
+            break
+
+    history = data.get("history")
+    history = history if isinstance(history, list) else []
+    monitor_results = _persistence_results(crop, monitor_current, history)
+
+    # ── Per-nutrient advice ──
+    nutrients = {}
+    health_params = {}
+    for nutrient in FERTILIZER_NUTRIENTS:
+        cfg = thresholds[nutrient]
+        label = cfg.get("label", nutrient)
+        unit = cfg.get("unit", "")
+        band = [cfg["min"], cfg["max"]]
+        buffer_ = float(cfg.get("buffer", 0))
+        base = {
+            "parameter": nutrient,
+            "label": label,
+            "unit": unit,
+            "band": band,
+            "buffer": buffer_,
+        }
+
+        if nutrient in faults:
+            # Not classified at all: `required` is null because we genuinely
+            # do not know, which is different from "not required". Every field
+            # is present and null so the response shape is uniform.
+            nutrients[nutrient] = dict(
+                base, current=None, status="NO_READING", required=None,
+                direction=None, gap=None, product=None,
+                nutrient_kg_ha=None, product_kg_ha=None,
+                advice=NO_READING_ADVICE, confidence="instant",
+                persistence="unavailable",
+            )
+            continue
+
+        value = readings[nutrient]
+        status = classify_reading(value, cfg)
+        required = status != "NORMAL"
+        direction = "deficient" if value < band[0] else ("excess" if value > band[1] else None)
+
+        # Distance to the nearest configured range edge. For a NORMAL reading
+        # this is 0. The buffer is a severity escalation width and is never
+        # subtracted from this number.
+        if direction == "deficient":
+            gap = round(band[0] - value, 2)
+        elif direction == "excess":
+            gap = round(value - band[1], 2)
+        else:
+            gap = 0.0
+
+        # A product class is named only for a confirmed deficiency. `amount`
+        # fields are the estimated scale of the top-up, and are null for every
+        # other status: there is nothing to estimate for a nutrient that is
+        # already in range, over-supplied, or not reporting.
+        product = None
+        nutrient_kg_ha = None
+        product_kg_ha = None
+
+        if direction == "deficient":
+            catalog = get_product(nutrient) or {}
+            fraction = catalog.get("nutrient_fraction")
+            product = {
+                "fertilizer": cfg.get("fertilizer"),
+                "name": catalog.get("name"),
+                "role": catalog.get("role"),
+                "nutrient_fraction": fraction,
             }
+            # gap is in the sensor's unit (ppm); convert once, to give a sense
+            # of application scale. Always surfaced as an estimate.
+            nutrient_kg_ha = round(gap * PPM_TO_KG_HA, 1)
+            if fraction:
+                product_kg_ha = round(nutrient_kg_ha / fraction, 1)
+
+        if direction == "deficient":
+            if product_kg_ha is not None:
+                advice = (
+                    f"{label} is {gap} {unit} below the configured range. "
+                    f"Estimated about {product_kg_ha} kg/ha of "
+                    f"{product['name']} needed to reach the range."
+                )
+            else:
+                advice = (
+                    f"{label} is {gap} {unit} below the configured range. "
+                    f"Consider a {cfg.get('fertilizer', '')} fertilizer "
+                    f"(e.g. {product['name']}) after field assessment."
+                )
+        elif direction == "excess":
+            advice = (
+                f"{label} is {gap} {unit} above the configured range. "
+                f"Hold off on applying more {nutrient}; no product is recommended."
+            )
+        else:
+            advice = WITHIN_RANGE_ADVICE.format(label=label)
+
+        pr = monitor_results.get(nutrient)
+        nutrients[nutrient] = dict(
+            base, current=round(value, 2), status=status, required=required,
+            direction=direction, gap=gap, product=product, advice=advice,
+            nutrient_kg_ha=nutrient_kg_ha, product_kg_ha=product_kg_ha,
+            confidence="persistent" if (pr and pr["persistent"]) else "instant",
+            persistence=pr["persistence"] if pr else "unavailable",
+        )
+
+        health_params[nutrient] = {
+            "status": status,
+            "current": value,
+            "trend": pr["trend"] if pr else "insufficient_data",
+            "persistent": bool(pr["persistent"]) if pr else False,
+            "recommended_range": band,
+        }
+
+    # ── Health + summary ──
+    # Nutrients that are not reporting are excluded from the score inputs, so
+    # a dead probe can neither raise nor mask a score. A score built from fewer
+    # than all three nutrients is flagged partial rather than presented as
+    # comparable to a full evaluation.
+    health_score = compute_health_score(health_params, config) if health_params else 0
+    partial = len(health_params) < len(FERTILIZER_NUTRIENTS)
+    statuses = [r["status"] for r in health_params.values()]
+    if not statuses:
+        health_status = "NO_READING"
+    elif "CRITICAL" in statuses:
+        health_status = "CRITICAL"
+    elif "WARNING" in statuses:
+        health_status = "WARNING"
+    else:
+        health_status = "NORMAL"
+
+    note = config["health_score_note"]
+    # Ordered N, P, K rather than alphabetically - the UI renders these lists.
+    evaluated = [n for n in FERTILIZER_NUTRIENTS if n in health_params]
+    if partial:
+        note += (
+            f" Partial: scored on {evaluated or 'no nutrients'} only, "
+            f"so it is not comparable to a full evaluation."
+        )
+
+    required_count = sum(1 for r in nutrients.values() if r["required"] is True)
 
     return jsonify({
         "crop": crop,
-        "recommendations": recommendations
+        "source": "crop_thresholds",
+        "stale": stale,
+        "reading_age_seconds": reading_age_seconds,
+        "stale_after_seconds": STALE_AFTER_SECONDS,
+        "health": {
+            "score": health_score,
+            "score_out_of": config["scoring"]["base"],
+            "status": health_status,
+            "partial": partial,
+            "evaluated": evaluated,
+            "label": config["health_score_label"],
+            "note": note,
+        },
+        "summary": {
+            "required_count": required_count,
+            "within_range": [n for n in FERTILIZER_NUTRIENTS
+                             if nutrients[n]["status"] == "NORMAL"],
+            "no_reading": [n for n in FERTILIZER_NUTRIENTS
+                           if nutrients[n]["status"] == "NO_READING"],
+        },
+        "nutrients": nutrients,
     })
+
+
+def _persistence_results(crop, current, history):
+    """Run the monitoring engine to decide instantaneous vs persistent advice.
+
+    Returns the engine's ``parameter_results`` keyed by parameter, or an empty
+    dict when persistence cannot be judged at all - which happens when the
+    client did not send the crop's full configured parameter set. Callers treat
+    an empty result as "instant", the conservative end of the two-tier design:
+    act on the current reading, but do not claim history backs it up.
+    """
+    try:
+        thresholds = get_thresholds(crop)
+    except KeyError:
+        return {}
+    if not set(thresholds).issubset(current):
+        return {}
+    try:
+        result = analyze_monitoring(crop, current, history)
+    except Exception:
+        return {}
+    return result.get("parameter_results", {})
 
 
 # ── Monitoring ─────────────────────────────────────────────────────────
@@ -257,10 +597,43 @@ def monitor():
     if "current" not in data:
         return jsonify({"error": "Missing field: current"}), 400
 
+    # Validate the crop up front so a bad crop is always a 400, even when a
+    # probe is also dead.
+    try:
+        get_thresholds(crop)
+    except KeyError as e:
+        return jsonify({"error": str(e)}), 400
+
+    current = data["current"]
+    if not isinstance(current, dict):
+        return jsonify({"error": "Field 'current' must be an object"}), 400
+
+    # ── Per-probe fault guard ──
+    # Which readings count as a dead probe is parameter-specific: see
+    # ZERO_FAULT_PARAMS / NEGATIVE_FAULT_PARAMS. A dead probe means the field
+    # is unmeasured, which is a different condition from "measured and wrong",
+    # so it is reported as its own status and generates no alerts. Note this
+    # deliberately does NOT catch 0% soil moisture or sub-zero air
+    # temperature, which are real readings and flow through to normal
+    # monitoring.
+    sensor_faults = sorted(p for p, v in current.items() if _probe_is_fault(p, v))
+    if sensor_faults:
+        return jsonify({
+            "crop": str(crop).lower(),
+            "overall_status": "SENSOR_FAULT",
+            "sensor_faults": sensor_faults,
+            "alerts": [],
+            "recommendations": [],
+            "message": (
+                "One or more probes are not reporting, so no alert was raised. "
+                "Check the sensor wiring and power before trusting this reading."
+            ),
+        }), 200
+
     history = data.get("history", [])
 
     try:
-        result = analyze_monitoring(crop, data["current"],
+        result = analyze_monitoring(crop, current,
                                     history if isinstance(history, list) else None)
     except (UnknownCropError, KeyError) as e:
         return jsonify({"error": str(e)}), 400
@@ -269,6 +642,7 @@ def monitor():
     except Exception as e:
         return jsonify({"error": f"Monitoring failed: {e}"}), 400
 
+    result["sensor_faults"] = []
     return jsonify(result)
 
 

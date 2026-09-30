@@ -140,7 +140,7 @@ final List<AlertRule> defaultAlertRules = [
   AlertRule(
     key: 'N',
     label: 'Nitrogen',
-    unit: 'kg/ha',
+    unit: 'ppm',
     min: 20,
     max: 120,
     buffer: 12,
@@ -150,7 +150,7 @@ final List<AlertRule> defaultAlertRules = [
   AlertRule(
     key: 'P',
     label: 'Phosphorus',
-    unit: 'kg/ha',
+    unit: 'ppm',
     min: 10,
     max: 60,
     buffer: 8,
@@ -160,7 +160,7 @@ final List<AlertRule> defaultAlertRules = [
   AlertRule(
     key: 'K',
     label: 'Potassium',
-    unit: 'kg/ha',
+    unit: 'ppm',
     min: 20,
     max: 180,
     buffer: 10,

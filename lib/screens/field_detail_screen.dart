@@ -798,32 +798,22 @@ class _MapPainter extends CustomPainter {
 class _ActivityTimeline extends StatelessWidget {
   const _ActivityTimeline();
 
-  static const _activities = [
-    _Activity(
-      icon: Icons.water_drop_rounded,
-      iconColor: Color(0xFF1565C0),
-      title: 'Irrigation Delivered',
-      detail: '15mm · Zone A-4',
-      time: 'Today, 6:00 AM',
-    ),
-    _Activity(
-      icon: Icons.agriculture_rounded,
-      iconColor: Color(0xFF2E7D32),
-      title: 'Nitrogen Fertilizer Applied',
-      detail: '50 kg/acre · Urea',
-      time: 'Yesterday',
-    ),
-    _Activity(
-      icon: Icons.sensors_rounded,
-      iconColor: Color(0xFF00796B),
-      title: 'Sensor Recalibrated',
-      detail: 'Moisture-X Hub',
-      time: 'Oct 12',
-    ),
-  ];
+  /// Deliberately empty.
+  ///
+  /// Every entry this list used to hold was invented demo data - a fabricated
+  /// fertilizer rate ('50 kg/acre · Urea'), a fabricated irrigation volume
+  /// ('15mm · Zone A-4'), a fabricated recalibration. SmartCrop has no record of
+  /// any of those events, so showing them implied history the app does not
+  /// have. There is no activity-log source to populate this from yet, so it
+  /// renders an empty state until one exists. Real per-nutrient advice lives on
+  /// the Fertilizer Advisor, which derives everything it shows from the live
+  /// reading.
+  static const List<_Activity> _activities = [];
 
   @override
   Widget build(BuildContext context) {
+    if (_activities.isEmpty) return const _ActivityEmptyState();
+
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
@@ -873,6 +863,58 @@ class _Activity {
   final String detail;
   final String time;
   const _Activity({required this.icon, required this.iconColor, required this.title, required this.detail, required this.time});
+}
+
+/// Shown in place of the activity list while there is no activity source.
+class _ActivityEmptyState extends StatelessWidget {
+  const _ActivityEmptyState();
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 28),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFEAEAEA)),
+      ),
+      child: Column(
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: const Color(0xFFF5F5F5),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(Icons.inbox_rounded,
+                size: 20, color: Color(0xFF9E9E9E)),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            'No activity recorded yet',
+            style: GoogleFonts.plusJakartaSans(
+              fontSize: 13,
+              fontWeight: FontWeight.w700,
+              color: const Color(0xFF1A1A1A),
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            'Field events will appear here once SmartCrop starts logging them.',
+            textAlign: TextAlign.center,
+            style: GoogleFonts.manrope(
+              fontSize: 11,
+              fontWeight: FontWeight.w500,
+              height: 1.4,
+              color: const Color(0xFF6B6B6B),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 class _TimelineTile extends StatelessWidget {
